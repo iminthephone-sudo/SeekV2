@@ -16,7 +16,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ..storage import Store, new_id, utc_now
-from .nlp import NLP
+from .nlp import NLP, stem
 
 COLLECTION = "jobs"
 STATUSES = ["saved", "applying", "applied", "interview", "offer", "hired", "closed"]
@@ -41,6 +41,9 @@ SIGNALS = {
     "driving_record": r"(clean|good|acceptable) (driving|motor vehicle) record|\bMVR\b",
     "license_required": r"valid driver'?s licen[sc]e",
 }
+# Hiring-policy words describe the employer, not a skill to put on a resume.
+POLICY_TERMS = (r"\b(criminal|record|records|conviction|felony|applicants?|employer|equal opportunity|eeo|"
+                r"background|drug|e-verify|accommodation|disabilit(y|ies)|veteran|benefits?|401k|pto)\b")
 EXCLUSION_PATTERNS = r"no (felon(y|ies)|convictions?|criminal record)|must not have (a|any) (felony|conviction)"
 
 
@@ -275,11 +278,12 @@ class JobEngine:
         text = raw.get("description", "")
         if len(text.split()) < 25:
             raise FetchError("Couldn't find a job description on that page. Paste the description instead.")
-        keywords = [k.to_dict() for k in self.nlp.keywords(text, top=40)]
+        title = clean_title(raw.get("title", ""), raw.get("company", ""))
+        keywords = self._keywords(text, raw.get("company", ""), title)
         job = {
             "id": new_id("job"),
             "url": url,
-            "title": clean_title(raw.get("title", ""), raw.get("company", "")) or "Untitled posting",
+            "title": title or "Untitled posting",
             "company": raw.get("company", ""),
             "location": raw.get("location", ""),
             "employment_type": raw.get("employment_type", ""),
@@ -299,6 +303,28 @@ class JobEngine:
         where = f" at {job['company']}" if job["company"] else ""
         self.store.append_history("job", f"Saved posting '{job['title']}'{where}", job_id=job["id"], url=url)
         return job
+
+    def _keywords(self, text: str, company: str, title: str = "") -> list[dict[str, Any]]:
+        """Posting keywords minus the employer's name, the bare job title and hiring-policy language.
+
+        The title is matched separately (headline suggestion), so "Associate" or
+        "Warehouse Associate" as keywords would only add noise.
+        """
+        def words_of(s: str) -> set[str]:
+            return {stem(w.lower()) for w in re.findall(r"[A-Za-z][\w&'-]+", s or "")}
+
+        company_words = words_of(company) | {"inc", "llc", "co", "company", "corporation"}
+        title_words = words_of(title)
+        out = []
+        for kw in self.nlp.keywords(text, top=45):
+            words = {stem(w) for w in kw.key.split()}
+            if kw.kind != "skill" and words and (words <= company_words or words <= title_words
+                                                 or words <= company_words | title_words):
+                continue
+            if any(re.search(p, kw.term, re.I) for p in SIGNALS.values()) or re.search(POLICY_TERMS, kw.term, re.I):
+                continue
+            out.append(kw.to_dict())
+        return out[:40]
 
     def fetch(self, url: str, progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
         page, final_url = fetch_url(url, progress)
@@ -346,7 +372,7 @@ class JobEngine:
         if "description" in changes and changes["description"] != job.get("description"):
             job["description"] = _tidy(changes["description"])
             job["sections"] = split_sections(job["description"])
-            job["keywords"] = [k.to_dict() for k in self.nlp.keywords(job["description"], top=40)]
+            job["keywords"] = self._keywords(job["description"], job.get("company", ""), job.get("title", ""))
             job["signals"] = detect_signals(job["description"])
         job["updated_at"] = utc_now()
         self.store.put(COLLECTION, job_id, job)

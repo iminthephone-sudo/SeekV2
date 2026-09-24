@@ -83,6 +83,19 @@
 - No legacy or dev-only Python UI launch logic remains in the production path.
 - The architecture is now fully compliant with AFWD, Platform, and agent requirements.
 
+## 7. SEEK v2 Runtime (2026-09-24) — justice outreach build
+- Purpose: job-readiness toolkit for a local justice outreach group; participant data stays on the machine.
+- Canonical runtime: Qt 6 Widgets shell (`shell/`, CMake) + Python engine pack (`python-backend/seek/`) behind a single bridge (`python-backend/seek_cpp_bridge.py`).
+- Launch: shell starts `python python-backend/seek_cpp_bridge.py --no-qt [--data-dir DIR]` via `QProcess`; Python never opens UI.
+- Bridge contract: stdin JSON request per line → stdout `SEEK_JSON:<json>` / `SEEK_PROGRESS:<json>`, stderr diagnostics only. Full method list and error codes: `docs/BRIDGE_CONTRACT.md`. No alternate bridge paths.
+- Shell owns: window chrome (FancyUI-style frameless window, title bar, collapsible sidebar), theme (FancyUI palette, light/dark/system), navigation, engine lifecycle (auto-restart ×2), PDF printing, file dialogs.
+- Engines own: multiple profiles per participant, resume render/export/analysis, spaCy NLP (skill lexicon `seek/data/skills.json`), job import (JSON-LD → HTML → paste fallback) with fair-chance/background signals, keyword optimizer (honest tailoring, saves a copy by default), cover letters from the participant's own bullets, fair-chance review + gap detection, durable `history.jsonl`.
+- Durable state: JSON documents under the per-user app data folder (`%APPDATA%\SEEK`, `~/.local/share/SEEK`), atomic writes, id validation on every path.
+- Fair-chance rule: suggest skill-first wording, never hide or misstate facts; growth paragraph in letters never mentions a record.
+- FancyUI (`QWidget-FancyUI/`) is the visual reference only (Windows-only DWM library); SEEK re-implements the look portably.
+- Validation done: `python -m pytest` (16 tests incl. real bridge process over stdio); shell builds warning-free with `-Wall -Wextra` on Qt 6.4; every page rendered light/dark under Xvfb via `SEEK_AUTOSHOT`.
+- Pending manual validation: Windows packaged build (`scripts/build_windows.ps1`), live URL imports against real job boards, PDF output review on target printers.
+
 ---
 
 **End of session notes.**

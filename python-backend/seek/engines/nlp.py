@@ -92,11 +92,20 @@ class Keyword:
         }
 
 
+def stem(word: str) -> str:
+    """Crude suffix stem, a safety net for words the tagger leaves unlemmatised ("unloaded" as ADJ)."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)]
+    return word
+
+
 @dataclass
 class TextProfile:
     """Everything the matcher needs to know about a block of text."""
 
     lemmas: set[str] = field(default_factory=set)
+    stems: set[str] = field(default_factory=set)
     phrases: set[str] = field(default_factory=set)
     skills: set[str] = field(default_factory=set)
 
@@ -269,6 +278,7 @@ class NLP:
         doc = self.doc(text)
         prof = TextProfile()
         prof.lemmas = {self._lemma(t) for t in doc if self._is_content(t)}
+        prof.stems = {stem(w) for w in prof.lemmas} | {stem(t.lower_) for t in doc if self._is_content(t)}
         prof.skills = {self.key(s) for s in self.find_skills(text)}
         prof.phrases = set(prof.skills)
         for sent in doc.sents:
@@ -280,7 +290,7 @@ class NLP:
         if keyword_key in prof.phrases or keyword_key in prof.skills:
             return True
         words = [w for w in keyword_key.split() if w not in BOILERPLATE]
-        return bool(words) and all(w in prof.lemmas for w in words)
+        return bool(words) and all(w in prof.lemmas or stem(w) in prof.stems for w in words)
 
     # -- bullet coaching ---------------------------------------------------------
     def review_bullet(self, text: str) -> dict:

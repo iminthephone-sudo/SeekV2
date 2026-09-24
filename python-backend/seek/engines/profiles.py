@@ -120,8 +120,8 @@ class ProfileEngine:
     def get(self, profile_id: str) -> dict[str, Any]:
         return self._require(profile_id)
 
-    def create(self, name: str = "New profile", participant: str = "", data: dict | None = None) -> dict[str, Any]:
-        profile = blank_profile(name, participant)
+    def create(self, name: str = "", participant: str = "", data: dict | None = None) -> dict[str, Any]:
+        profile = blank_profile(name or (data or {}).get("name") or "New profile", participant)
         if data:
             merged = {**profile, **data, "id": profile["id"], "created_at": profile["created_at"],
                       # Explicit arguments win over whatever the data payload carries.

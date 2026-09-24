@@ -44,6 +44,13 @@ def test_profiles_crud_and_multiple(service, profile):
     assert service.call("profile.active")["id"] == profile["id"]
 
 
+def test_create_uses_name_from_data_when_not_given(service):
+    created = service.call("profile.create", {"data": SAMPLE_PROFILE})
+    assert created["name"] == "Warehouse focus" and created["participant"] == "Marcus R."
+    explicit = service.call("profile.create", {"name": "Override", "data": SAMPLE_PROFILE})
+    assert explicit["name"] == "Override"
+
+
 def test_invalid_ids_are_rejected(service):
     with pytest.raises(BridgeError) as err:
         service.call("profile.get", {"profile_id": "../../etc/passwd"})
@@ -137,7 +144,10 @@ def test_optimizer_match_and_tailor(service, profile):
     assert applied["match"]["score"] > result["score"]
     tailored = applied["profile"]
     assert tailored["id"] != profile["id"] and "FastShip" in tailored["name"]
-    assert tailored["experience"][1]["bullets"][0].startswith("Operated forklift")
+    # Bullets are reordered by relevance: the forklift/freight bullets now lead, the generic one trails.
+    warehouse = tailored["experience"][1]["bullets"]
+    assert warehouse[0].startswith(("Operated forklift", "Loaded and unloaded"))
+    assert sorted(warehouse) == sorted(SAMPLE_PROFILE["experience"][1]["bullets"])
     # The original profile is untouched.
     assert "cycle counting" not in service.call("profile.get", {"profile_id": profile["id"]})["skills"]
 

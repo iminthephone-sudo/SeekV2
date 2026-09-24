@@ -31,7 +31,7 @@ CLOSINGS = {
     "professional": "Thank you for considering my application. I would welcome the chance to discuss how I can "
                     "contribute{to_company}, and I am available to start {availability}.",
     "warm": "Thank you for taking the time to read my letter. I'd be grateful for the chance to talk about how I "
-            "can help{to_company}. I'm available to start {availability}.",
+            "can contribute{to_company}. I'm available to start {availability}.",
     "direct": "I'm ready to get to work and available to start {availability}. I'd appreciate the chance to "
               "interview{with_company}.",
 }
