@@ -1,0 +1,90 @@
+{
+  "_comment": "Skill phrases matched with spaCy's PhraseMatcher (case-insensitive). Weighted toward the trades, logistics, service and entry-level office roles outreach participants most often target. Add lines freely; aliases map to one canonical name.",
+  "categories": {
+    "Warehouse & Logistics": [
+      "forklift", "forklift certification", "pallet jack", "reach truck", "order picking", "picking and packing",
+      "shipping and receiving", "inventory", "inventory control", "cycle counting", "loading and unloading",
+      "RF scanner", "warehouse management system", "WMS", "material handling", "stocking", "freight", "logistics",
+      "dock operations", "palletizing", "labeling"
+    ],
+    "Driving & Transportation": [
+      "CDL", "CDL Class A", "CDL Class B", "commercial driving", "delivery driving", "route planning",
+      "defensive driving", "DOT regulations", "pre-trip inspection", "clean driving record", "valid driver's license"
+    ],
+    "Construction & Trades": [
+      "carpentry", "framing", "drywall", "painting", "roofing", "concrete", "masonry", "demolition", "power tools",
+      "hand tools", "blueprint reading", "welding", "MIG welding", "TIG welding", "plumbing", "electrical",
+      "HVAC", "landscaping", "groundskeeping", "general labor", "flooring", "tile setting", "scaffolding",
+      "heavy equipment", "excavator", "OSHA 10", "OSHA 30", "OSHA", "flagger certification", "fall protection"
+    ],
+    "Manufacturing": [
+      "assembly", "assembly line", "machine operation", "CNC", "quality control", "quality inspection",
+      "lean manufacturing", "production", "packaging", "sanitation", "GMP", "lockout/tagout", "measuring tools",
+      "calipers", "soldering"
+    ],
+    "Food Service & Hospitality": [
+      "food handler", "food handler's card", "ServSafe", "food preparation", "line cook", "prep cook",
+      "dishwashing", "food safety", "kitchen sanitation", "catering", "barista", "cashiering", "front of house",
+      "back of house", "housekeeping", "hospitality", "bussing", "knife skills", "baking"
+    ],
+    "Customer Service & Retail": [
+      "customer service", "point of sale", "POS", "cash handling", "merchandising", "retail sales", "upselling",
+      "conflict resolution", "de-escalation", "call center", "phone etiquette", "complaint resolution",
+      "customer satisfaction", "returns processing", "store opening and closing"
+    ],
+    "Office & Administrative": [
+      "data entry", "filing", "scheduling", "Microsoft Office", "Microsoft Word", "Microsoft Excel", "Excel",
+      "Outlook", "Google Workspace", "Google Sheets", "typing", "10-key", "record keeping", "reception",
+      "bookkeeping", "QuickBooks", "payroll", "billing", "invoicing", "office administration", "multi-line phone"
+    ],
+    "Healthcare & Human Services": [
+      "CPR", "First Aid", "CPR/First Aid", "BLS", "CNA", "caregiving", "home health aide", "patient care",
+      "peer support", "peer support specialist", "case management", "mentoring", "recovery coaching",
+      "crisis intervention", "community outreach", "mental health first aid", "HIPAA", "medical terminology"
+    ],
+    "Technology": [
+      "computer literacy", "IT support", "help desk", "troubleshooting", "hardware repair", "networking",
+      "CompTIA A+", "CompTIA Network+", "Python", "JavaScript", "HTML", "CSS", "SQL", "Java", "C++", "Linux",
+      "Windows", "cybersecurity", "web development", "technical support", "social media", "graphic design",
+      "Adobe Photoshop", "video editing"
+    ],
+    "Maintenance & Janitorial": [
+      "custodial", "janitorial", "floor care", "floor buffing", "building maintenance", "facility maintenance",
+      "preventive maintenance", "pest control", "hazardous materials", "cleaning chemicals", "HAZMAT",
+      "small engine repair", "auto mechanics", "automotive repair", "tire service", "oil change"
+    ],
+    "Soft Skills": [
+      "teamwork", "communication", "leadership", "problem solving", "time management", "attention to detail",
+      "reliability", "punctuality", "adaptability", "work ethic", "organization", "multitasking",
+      "critical thinking", "training others", "supervision", "bilingual", "Spanish", "safety compliance",
+      "following instructions", "self-motivated", "fast learner", "accountability"
+    ]
+  },
+  "aliases": {
+    "fork lift": "forklift",
+    "fork-lift": "forklift",
+    "pos system": "point of sale",
+    "point-of-sale": "point of sale",
+    "ms office": "Microsoft Office",
+    "ms word": "Microsoft Word",
+    "ms excel": "Microsoft Excel",
+    "servsafe certified": "ServSafe",
+    "food handlers card": "food handler's card",
+    "food handler card": "food handler's card",
+    "first aid/cpr": "CPR/First Aid",
+    "cpr and first aid": "CPR/First Aid",
+    "commercial driver's license": "CDL",
+    "commercial drivers license": "CDL",
+    "class a cdl": "CDL Class A",
+    "class b cdl": "CDL Class B",
+    "lock out tag out": "lockout/tagout",
+    "loto": "lockout/tagout",
+    "osha-10": "OSHA 10",
+    "osha-30": "OSHA 30",
+    "a+ certification": "CompTIA A+",
+    "customer-service": "customer service",
+    "de escalation": "de-escalation",
+    "10 key": "10-key",
+    "ten key": "10-key"
+  }
+}
