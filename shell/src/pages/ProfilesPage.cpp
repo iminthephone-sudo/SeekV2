@@ -270,6 +270,7 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
         loadProfile(id);
     });
     connect(ctx, &AppContext::profilesChanged, this, &ProfilesPage::rebuildTree);
+    connect(Theme::instance(), &Theme::changed, this, &ProfilesPage::rebuildTree);  // re-tint list icons
     connect(ctx, &AppContext::activeProfileChanged, this, [this] {
         m_activeBadge->setVisible(m_currentId == m_ctx->activeProfileId());
         m_setActive->setVisible(m_currentId != m_ctx->activeProfileId());

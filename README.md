@@ -16,6 +16,7 @@ Everything runs **locally**; participant data never leaves the computer.
 | **Job posting import** | Paste a link: SEEK reads the posting (schema.org JSON-LD or page text), extracts ranked keywords, and flags *fair-chance*, background-check, drug-screen and exclusion language. If a site blocks it, paste the description instead. |
 | **Keyword optimizer** | Match score against a posting, what's covered, what's missing, and the most relevant bullets. Tailors honestly: only confirmed skills are added, and the result saves as a new profile by default. |
 | **Cover letter writer** | Letters built from the participant's own best-matching bullets, skills and credentials. Choose Professional, Warm or Direct tone, and optionally add a growth paragraph that never mentions a record. Edit, save, and export to PDF, Word or text. |
+| **Interview practice** | **S.T.A.R.S** (Situation, Task, Action, Result, Skills) answers for 12 behavioral questions, or your own. Includes story ideas pulled from the profile and part-by-part spaCy coaching ("I" vs "we", concrete steps, numbers, filler words, blame words, skills tied to the posting). Produces a polished answer to rehearse. **Workplace assessment** practice has 20 agree/disagree statements like those in hourly-job applications, with coaching as you answer, trait bars, and flags for contradictions and too-good-to-be-true answers. |
 | **Fair-chance review** | Flags wording that leads with the setting ("Correctional Facility", "inmates") instead of the skill, with skill-first alternatives. Detects employment gaps and includes staff guidance. |
 | **Activity log** | A durable history of everything done, for case notes and program reporting. |
 
@@ -24,6 +25,8 @@ Everything runs **locally**; participant data never leaves the computer.
 <img src="docs/screenshots/optimize-dark.png" width="49%" alt="Keyword optimizer">
 <img src="docs/screenshots/jobs-light.png" width="49%" alt="Job postings">
 <img src="docs/screenshots/letters-dark.png" width="49%" alt="Cover letters">
+<img src="docs/screenshots/interview-stars-light.png" width="49%" alt="S.T.A.R.S interview coaching">
+<img src="docs/screenshots/interview-assessment-dark.png" width="49%" alt="Workplace assessment practice">
 </p>
 
 ## How it's built
@@ -85,6 +88,8 @@ python seek_cpp_bridge.py --no-qt --call system.status
 4. **Match with a profile.** Tick only the skills the participant really has, then click *Apply* to create a
    tailored copy.
 5. **Write cover letter.** Pick a tone, add a personal sentence, generate, edit, and export.
+6. **Interview practice.** Pick a question, click *Use* on a story idea, write the five S.T.A.R.S parts, and click
+   *Coach me* until it's interview-ready. Then run the workplace assessment practice.
 
 ## Configuration
 

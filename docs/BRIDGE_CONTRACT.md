@@ -128,6 +128,16 @@ A job record includes `keywords[{term, key, score, kind: skill|phrase, category,
 | `letter.export` | `letter_id`, `format` = `docx`\|`txt`, `path` | written path |
 | `letter.tones` | – | `professional, warm, direct` |
 
+### Interview practice (S.T.A.R.S and workplace assessment)
+| Method | Params | Result |
+|---|---|---|
+| `interview.stars_questions` | – | `{questions[{id, category, question, looking_for, keywords, tip, sensitive?}], parts[{key, label, hint}]}` |
+| `interview.story_ideas` | `profile_id`, `question_id`, `custom_question?` | profile bullets/training ranked for the question, each with a `starter{situation, action, result}` |
+| `interview.stars_coach` | `question_id` (or `custom`), `answers{situation, task, action, result, skills}`, `custom_question?`, `job_id?`, `profile_id?`, `save?` | `{score, grade, parts{<part>:{score, words, good[], feedback[]}}, notes[], next_step, polished, word_count, speaking_seconds, record?}` |
+| `interview.assessment_items` | – | `{traits{key:{label, about}}, items[{id, trait, text, reverse, pair?, absolute?, coaching}], scale[5]}` |
+| `interview.assessment_score` | `answers{item_id: 1..5}`, `profile_id?`, `save?` | `{traits[{key, label, score}], items[{id, answer, fit: strong\|ok\|concern, coaching}], flags[{kind: inconsistent\|too_good\|same_answer\|integrity, message}], consistency, strengths[], growth[], tips[], record?}` |
+| `interview.saved` / `interview.delete` | `profile_id?`, `type?` = `stars`\|`assessment` / `record_id` | saved practice, newest first |
+
 ### History
 | Method | Params | Result |
 |---|---|---|

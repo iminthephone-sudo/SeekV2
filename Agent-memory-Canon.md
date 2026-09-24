@@ -93,7 +93,8 @@
 - Durable state: JSON documents under the per-user app data folder (`%APPDATA%\SEEK`, `~/.local/share/SEEK`), atomic writes, id validation on every path.
 - Fair-chance rule: suggest skill-first wording, never hide or misstate facts; growth paragraph in letters never mentions a record.
 - FancyUI (`QWidget-FancyUI/`) is the visual reference only (Windows-only DWM library); SEEK re-implements the look portably.
-- Validation done: `python -m pytest` (16 tests incl. real bridge process over stdio); shell builds warning-free with `-Wall -Wextra` on Qt 6.4; every page rendered light/dark under Xvfb via `SEEK_AUTOSHOT`.
+- Validation done: `python -m pytest` (25 tests incl. real bridge process over stdio); shell builds warning-free with `-Wall -Wextra` on Qt 6.4; every page rendered light/dark under Xvfb via `SEEK_AUTOSHOT`.
+- Interview practice page (2026-09-24): `engines/interview.py` + `pages/InterviewPage`. S.T.A.R.S = Situation, Task, Action, Result, Skills; question bank `seek/data/stars_questions.json`, assessment bank `seek/data/assessment.json` (practice/coaching only, always "answer honestly"). Saved under `interview/`.
 - Pending manual validation: Windows packaged build (`scripts/build_windows.ps1`), live URL imports against real job boards, PDF output review on target printers.
 
 ---

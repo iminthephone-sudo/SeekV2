@@ -25,6 +25,7 @@ SEEK follows the platform rules in `Agent-memory-Canon.md`:
 │ engines/optimizer.py   match score, gaps, honest tailoring                            │
 │ engines/cover_letter.py letters built from the participant's own bullets              │
 │ engines/fair_chance.py skill-first wording review, gap detection, staff guidance      │
+│ engines/interview.py   S.T.A.R.S answer coaching + workplace-assessment practice      │
 │ storage.py             local JSON documents (atomic writes) + history.jsonl           │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -53,6 +54,7 @@ You can override it with Settings → Engine → Data folder, `--data-dir`, or `
 SEEK/
   profiles/prof_*.json   one document per profile
   jobs/job_*.json        saved postings with keywords and signals
+  interview/int_*.json   saved S.T.A.R.S answers and assessment practice
   letters/ltr_*.json     cover letters
   settings/app.json      engine-side settings (active profile)
   history.jsonl          append-only activity log (durable history for bridge-fed workflows)
@@ -76,6 +78,12 @@ SEEK's language features run on spaCy (`en_core_web_sm` by default; set `SEEK_SP
   numbers, weak openers ("responsible for") and length.
 * **Letters:** the most relevant bullets (ranked against the posting) are rewritten into prose. The letter
   names the skills and credentials the posting asks for. Nothing is invented.
+
+* **Interview coaching:** each S.T.A.R.S part is checked with spaCy: first-person verbs vs. "we" in the Action,
+  numbers and outcome words in the Result, named skills (and the posting's keywords) in Skills, setting
+  language, hedges and blame words. The assessment items live in `seek/data/assessment.json`. They are
+  trait-keyed, with reverse-worded pairs for consistency and "never/always" items for realism. They are for
+  practice and coaching, not psychological testing.
 
 If the model isn't installed, the engine runs in *basic* mode (a blank English pipeline plus rules) and
 `system.status` reports how to install the full model. The shell shows that on Home and Settings.

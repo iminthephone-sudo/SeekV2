@@ -171,6 +171,9 @@ LettersPage::LettersPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx
     });
     connect(ctx, &AppContext::profilesChanged, this, [this] { m_ctx->fillProfileCombo(m_profile); });
     connect(ctx, &AppContext::jobsChanged, this, [this] { m_ctx->fillJobCombo(m_job, {}, true); });
+    connect(Theme::instance(), &Theme::changed, this, [this] {
+        if (m_ctx->bridge()->isReady()) refreshList();  // re-tint list icons
+    });
     setDirty(false);
 }
 

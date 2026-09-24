@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
         QDir().mkpath(shotDir);
         window.resize(1400, 900);
         QObject::connect(ctx.bridge(), &SeekBridge::ready, &window, [&window, &ctx, shotDir] {
-            const QStringList pages = {"home", "profiles", "resume", "jobs", "optimize", "letters", "history", "settings"};
+            const QStringList pages = {"home", "profiles", "resume", "jobs", "optimize", "letters", "interview", "history", "settings"};
             auto* step = new int(0);
             auto* timer = new QTimer(&window);
             QObject::connect(timer, &QTimer::timeout, &window, [=, &window, &ctx]() mutable {
@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
                 }
                 if (n == 0) Theme::instance()->setMode(Theme::Mode::Light);
                 if (n == pages.size()) Theme::instance()->setMode(Theme::Mode::Dark);
-                ctx.navigate(pages.at(n % pages.size()), {{"run", true}});
+                ctx.navigate(pages.at(n % pages.size()), {{"run", true}, {"latest", true}});
                 ++*step;
             });
             timer->start(1500);

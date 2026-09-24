@@ -14,6 +14,7 @@
 #include "core/Theme.h"
 #include "pages/HistoryPage.h"
 #include "pages/HomePage.h"
+#include "pages/InterviewPage.h"
 #include "pages/JobsPage.h"
 #include "pages/LettersPage.h"
 #include "pages/OptimizePage.h"
@@ -69,6 +70,7 @@ MainWindow::MainWindow(AppContext* ctx, QWidget* parent) : QWidget(parent), m_ct
     addPage("jobs", "briefcase", tr("Job postings"), new JobsPage(ctx));
     addPage("optimize", "bullseye", tr("Keyword optimizer"), new OptimizePage(ctx));
     addPage("letters", "envelope-paper", tr("Cover letters"), new LettersPage(ctx));
+    addPage("interview", "chat-quote", tr("Interview practice"), new InterviewPage(ctx));
     addPage("history", "clock-history", tr("Activity"), new HistoryPage(ctx));
     addPage("settings", "gear", tr("Settings"), new SettingsPage(ctx), true);
 

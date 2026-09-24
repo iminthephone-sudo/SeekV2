@@ -31,6 +31,7 @@ from .engines import fair_chance, resume
 from .engines.cover_letter import TONES, CoverLetterEngine
 from .engines.jobs import STATUSES, FetchError, JobEngine
 from .engines.nlp import NLP, get_nlp
+from .engines.interview import InterviewEngine
 from .engines.optimizer import OptimizerEngine
 from .engines.profiles import CONTACT_FIELDS, SECTION_FIELDS, TEMPLATES, ProfileEngine
 from .storage import Store
@@ -69,6 +70,7 @@ class SeekService:
         self.jobs = JobEngine(self.store, self.nlp)
         self.optimizer = OptimizerEngine(self.store, self.nlp, self.profiles)
         self.letters = CoverLetterEngine(self.store, self.nlp, self.profiles)
+        self.interview = InterviewEngine(self.store, self.nlp)
         self.shutdown_requested = False
         self._progress: Callable[[int, str], None] = lambda pct, msg: None
         self.methods: dict[str, Callable[..., Any]] = {
@@ -110,6 +112,13 @@ class SeekService:
             "letter.list": self.letters.list,
             "letter.delete": self.letters.delete,
             "letter.export": self.letters.export,
+            "interview.stars_questions": self.interview.stars_questions,
+            "interview.story_ideas": self.interview.story_ideas,
+            "interview.stars_coach": self.interview.coach,
+            "interview.assessment_items": self.interview.assessment_items,
+            "interview.assessment_score": self.interview.score_assessment,
+            "interview.saved": self.interview.saved,
+            "interview.delete": self.interview.delete,
             "history.list": lambda limit=200, kind=None: self.store.history(int(limit), kind),
         }
 

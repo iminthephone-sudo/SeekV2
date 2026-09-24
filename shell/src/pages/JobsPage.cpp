@@ -207,6 +207,7 @@ JobsPage::JobsPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(ctx) 
         }, this);
     });
     connect(ctx, &AppContext::jobsChanged, this, &JobsPage::rebuildList);
+    connect(Theme::instance(), &Theme::changed, this, &JobsPage::rebuildList);  // re-tint list icons
     connect(ctx->bridge(), &SeekBridge::progress, this, [this](const QString& id, int pct, const QString& msg) {
         if (id != m_fetchRequest) return;
         m_progress->setValue(pct);

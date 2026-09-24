@@ -130,7 +130,7 @@ ResumePage::ResumePage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(c
 
     // Coach tab
     QVBoxLayout* coach = nullptr;
-    m_side->addTab(scrollColumn(coach), Theme::instance()->icon("stars"), tr("Coach"));
+    m_side->addTab(scrollColumn(coach), tr("Coach"));
     auto* scoreRow = new QHBoxLayout;
     m_score = new ScoreRing;
     m_score->setFixedSize(120, 120);
@@ -147,7 +147,13 @@ ResumePage::ResumePage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(c
 
     // Fair-chance tab
     QVBoxLayout* fc = nullptr;
-    m_side->addTab(scrollColumn(fc), Theme::instance()->icon("shield-check"), tr("Fair-chance review"));
+    m_side->addTab(scrollColumn(fc), tr("Fair-chance review"));
+    auto tabIcons = [this] {
+        m_side->setTabIcon(0, Theme::instance()->icon("stars"));
+        m_side->setTabIcon(1, Theme::instance()->icon("shield-check"));
+    };
+    tabIcons();
+    connect(Theme::instance(), &Theme::changed, this, tabIcons);
     m_fcSummary = ui::label(QString());
     fc->addWidget(m_fcSummary);
     m_findings = new QVBoxLayout;

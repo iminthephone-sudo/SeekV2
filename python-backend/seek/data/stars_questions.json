@@ -1,0 +1,102 @@
+{
+  "_comment": "Behavioral interview questions for S.T.A.R.S practice (Situation, Task, Action, Result, Skills). 'keywords' help SEEK suggest stories from the participant's own profile.",
+  "questions": [
+    {
+      "id": "teamwork",
+      "category": "Teamwork",
+      "question": "Tell me about a time you worked with a team to get something done.",
+      "looking_for": "That you pull your weight, communicate, and care about the group's result, not just your own.",
+      "keywords": ["team", "crew", "together", "help", "shift", "coworker", "group", "trained"],
+      "tip": "Say what YOU did inside the team. Use 'I' for your actions and 'we' only for the shared result."
+    },
+    {
+      "id": "conflict",
+      "category": "Working with people",
+      "question": "Describe a time you had a disagreement with a coworker or supervisor. How did you handle it?",
+      "looking_for": "Calm, respectful problem-solving. They want to see you can disagree without blowing up or blaming.",
+      "keywords": ["disagree", "conflict", "calm", "listen", "resolve", "talk", "compromise"],
+      "tip": "Keep the other person neutral. Focus on how you listened, stayed calm and found a fix."
+    },
+    {
+      "id": "pressure",
+      "category": "Pressure",
+      "question": "Tell me about a time you had to work under pressure or a tight deadline.",
+      "looking_for": "That you stay steady, prioritise, and still do quality work when it's busy.",
+      "keywords": ["busy", "deadline", "rush", "pressure", "fast", "meals", "orders", "shift", "daily"],
+      "tip": "Numbers make pressure real: how many orders, meals, trucks, customers, in how much time."
+    },
+    {
+      "id": "mistake",
+      "category": "Accountability",
+      "question": "Tell me about a mistake you made at work and what you did about it.",
+      "looking_for": "Ownership. Employers trust people who admit mistakes, fix them, and change how they work.",
+      "keywords": ["mistake", "fixed", "error", "wrong", "learned", "corrected", "responsible"],
+      "tip": "Pick a real but small work mistake. Spend most of the answer on how you fixed it and what you do differently now."
+    },
+    {
+      "id": "learn_fast",
+      "category": "Learning",
+      "question": "Tell me about a time you had to learn something new quickly.",
+      "looking_for": "That you're coachable and pick up new tools, rules and tasks fast.",
+      "keywords": ["learned", "trained", "certification", "program", "new", "course", "training"],
+      "tip": "Training programs and certifications are perfect stories here, including ones earned during a program."
+    },
+    {
+      "id": "customer",
+      "category": "Customer service",
+      "question": "Tell me about a time you helped a difficult customer or person.",
+      "looking_for": "Patience, respect and follow-through, even when someone is upset.",
+      "keywords": ["customer", "served", "helped", "upset", "complaint", "resident", "patient", "guest"],
+      "tip": "Show you stayed respectful, found out what they needed, and made it right."
+    },
+    {
+      "id": "rules_safety",
+      "category": "Safety & rules",
+      "question": "Tell me about a time you followed safety rules or procedures even when it was inconvenient.",
+      "looking_for": "Reliability with safety and policy. This matters a lot in warehouses, kitchens and construction.",
+      "keywords": ["safety", "osha", "sanitation", "procedure", "standards", "inspection", "forklift", "incidents"],
+      "tip": "Name the rule, why it mattered, and the result: zero incidents, a passed inspection, nobody hurt."
+    },
+    {
+      "id": "initiative",
+      "category": "Initiative",
+      "question": "Tell me about a time you went above and beyond or took initiative.",
+      "looking_for": "That you notice problems and act without being told.",
+      "keywords": ["improved", "reduced", "organized", "started", "volunteered", "extra", "waste"],
+      "tip": "Explain what you noticed, what you did on your own, and what got better."
+    },
+    {
+      "id": "leadership",
+      "category": "Leadership",
+      "question": "Tell me about a time you trained, led or helped someone else succeed.",
+      "looking_for": "Patience and responsibility. Leading a crew or training peers counts even without a supervisor title.",
+      "keywords": ["trained", "led", "mentor", "taught", "supervised", "crew", "lead", "new"],
+      "tip": "Say how many people, what you taught them, and how they did afterwards."
+    },
+    {
+      "id": "reliability",
+      "category": "Reliability",
+      "question": "How have you shown that you are dependable?",
+      "looking_for": "Attendance, punctuality and follow-through. They're asking: will you show up and do the job?",
+      "keywords": ["attendance", "on time", "never missed", "consistent", "reliable", "every", "daily"],
+      "tip": "Use facts: months without a missed shift, being trusted with keys or inventory, early starts."
+    },
+    {
+      "id": "gap",
+      "category": "Your background",
+      "question": "Can you tell me about this gap in your work history?",
+      "looking_for": "An honest, short answer that quickly moves to what you learned and why you're ready now.",
+      "keywords": ["program", "training", "certification", "learned", "ready", "volunteer", "growth"],
+      "tip": "Keep the background part to one or two honest sentences. Spend the rest on what you did to grow and why you're ready for this job. Practise it out loud with your outreach team.",
+      "sensitive": true
+    },
+    {
+      "id": "why_hire",
+      "category": "Closing",
+      "question": "Why should we hire you?",
+      "looking_for": "A confident summary linking your skills to their needs.",
+      "keywords": ["skills", "certified", "experience", "reliable", "ready"],
+      "tip": "Use the Skills step to connect two or three strengths to what the posting asks for."
+    }
+  ]
+}
