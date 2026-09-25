@@ -110,25 +110,41 @@ if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
 }
 
 # -- build --------------------------------------------------------------------------------------------
+# Which Qt a configured build folder really uses. Qt6Core_DIR is set by find_package itself (Qt6_DIR can be
+# "UNINITIALIZED" when it came from the command line). Returns a normalized path, or "" if not configured.
+function Get-UsedQtCore([string]$cacheFile) {
+    if (-not (Test-Path $cacheFile)) { return "" }
+    $line = Select-String -Path $cacheFile -Pattern "^Qt6Core_DIR:[A-Z]+=(.*)$" | Select-Object -First 1
+    if (-not $line) { return "" }
+    return $line.Matches[0].Groups[1].Value.Replace("/", "\").TrimEnd("\")
+}
+
 $build = Join-Path $root "shell\build"
 $cache = Join-Path $build "CMakeCache.txt"
+$expectedCore = (Join-Path (Join-Path $kit.Path "lib\cmake") "Qt6Core").Replace("/", "\").TrimEnd("\")
 if ($Clean -and (Test-Path $build)) { Remove-Item $build -Recurse -Force }
 elseif (Test-Path $cache) {
-    # A build folder configured for another Qt (or by an earlier failed run) keeps the old Qt in its cache.
-    $cached = Select-String -Path $cache -Pattern "^Qt6_DIR:PATH=(.*)$" | Select-Object -First 1
-    if ($cached -and ($cached.Matches[0].Groups[1].Value.Replace("/", "\") -ne $qtCmake)) {
-        Write-Host "Build folder was set up for a different Qt; starting it fresh."
+    # A build folder configured for another Qt keeps that Qt in its cache: start it fresh.
+    $cachedCore = Get-UsedQtCore $cache
+    if ($cachedCore -and ($cachedCore -ne $expectedCore)) {
+        Write-Host "Build folder was set up for a different Qt ($cachedCore); starting it fresh."
         Remove-Item $build -Recurse -Force
     }
 }
 $dist = Join-Path $root "dist"
-Invoke-Step "Configure (CMake)" { cmake -S (Join-Path $root "shell") -B $build "-DCMAKE_PREFIX_PATH=$($kit.Path)" "-DQt6_DIR=$qtCmake" }
+# Forward slashes: CMake reads backslashes in -D values as escapes in some places.
+$kitCm = $kit.Path.Replace("\", "/")
+$qtCmakeCm = $qtCmake.Replace("\", "/")
+Invoke-Step "Configure (CMake)" { cmake -S (Join-Path $root "shell") -B $build "-DCMAKE_PREFIX_PATH=$kitCm" "-DQt6_DIR=$qtCmakeCm" }
 # CMake quietly falls back to another Qt it can find (on PATH, in the registry) when the kit isn't usable.
-$used = Select-String -Path $cache -Pattern "^Qt6_DIR:PATH=(.*)$" | Select-Object -First 1
-$usedDir = if ($used) { $used.Matches[0].Groups[1].Value.Replace("/", "\") } else { "(none)" }
-if ($usedDir.TrimEnd("\") -ne $qtCmake.Replace("/", "\").TrimEnd("\")) {
-    throw "CMake used a different Qt ($usedDir) instead of $qtCmake. Check that the kit is complete, or run with -Clean."
+$usedCore = Get-UsedQtCore $cache
+if (-not $usedCore) {
+    throw "CMake finished but didn't record which Qt it used (no Qt6Core_DIR in $cache). Run again with -Clean."
 }
+if ($usedCore -ne $expectedCore) {
+    throw "CMake used a different Qt ($usedCore) instead of $expectedCore. Check that the kit is complete, or run with -Clean."
+}
+Write-Host "Using Qt from:   $usedCore"
 Invoke-Step "Build (Release)" { cmake --build $build --config Release }
 Invoke-Step "Install to dist" { cmake --install $build --config Release --prefix $dist }
 Invoke-Step "Add the Qt runtime (windeployqt)" { & $deploy --release --no-translations (Join-Path $dist "SEEK.exe") }
