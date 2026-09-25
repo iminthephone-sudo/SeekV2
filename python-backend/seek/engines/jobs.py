@@ -21,8 +21,25 @@ from .nlp import NLP, stem
 COLLECTION = "jobs"
 STATUSES = ["saved", "applying", "applied", "interview", "offer", "hired", "closed"]
 MAX_BYTES = 4 * 1024 * 1024
+# Bot filters (Cloudflare, Akamai, DataDome) reject anything that doesn't look like a real browser:
+# an extra product token such as "SEEK/2.0", a non-canonical "Chrome/126.0" version, or a header set
+# missing what Chrome always sends. Keep this matching a current Chrome release exactly.
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-              "Chrome/126.0 Safari/537.36 SEEK/2.0")
+              "Chrome/131.0.0.0 Safari/537.36")
+BROWSER_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+BLOCKED_STATUSES = (401, 403, 429, 999)
 
 SECTION_HEADINGS = {
     "responsibilities": ("responsibilities", "duties", "what you'll do", "what you will do", "the role",
@@ -196,39 +213,85 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
     }
 
 
+def _has_curl_cffi() -> bool:
+    try:
+        import curl_cffi  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _open(url: str, impersonate: bool) -> Any:
+    """Start a streaming GET for ``url``; the caller closes the response."""
+    if impersonate:
+        from curl_cffi import requests as curl_requests
+        # Most job-board 403s aren't about headers at all: the WAF fingerprints the TLS/HTTP2
+        # handshake, and Python's ssl module is on every blocklist. curl_cffi replays Chrome's
+        # handshake (and sends Chrome's own headers), so the request is indistinguishable from a browser.
+        return curl_requests.get(url, impersonate="chrome", timeout=20, stream=True, allow_redirects=True)
+    import requests
+    return requests.get(url, headers=BROWSER_HEADERS, timeout=20, stream=True, allow_redirects=True)
+
+
+def _decode(body: bytes, content_type: str) -> str:
+    # Don't trust requests' resp.encoding: it assumes ISO-8859-1 for text/html without a charset,
+    # which turns UTF-8 dashes, bullets and apostrophes into mojibake. Header, then <meta>, then UTF-8.
+    match = (re.search(r"charset=[\"']?([\w-]+)", content_type or "", re.I)
+             or re.search(r"<meta[^>]+charset=[\"']?([\w-]+)", body[:4096].decode("ascii", "ignore"), re.I))
+    try:
+        return body.decode(match.group(1) if match else "utf-8", errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
 def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> tuple[str, str]:
-    parsed = urlparse(url.strip())
+    url = url.strip()
+    parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise FetchError("Enter a full web address starting with http:// or https://")
     try:
-        import requests
+        import requests  # noqa: F401
     except ImportError as exc:  # pragma: no cover
         raise FetchError("URL import needs the 'requests' package: pip install requests") from exc
+    # Browser-grade client first; plain requests is the fallback if curl_cffi is missing or fails.
+    attempts = [True, False] if _has_curl_cffi() else [False]
     if progress:
         progress(15, f"Contacting {parsed.netloc}…")
+    resp, failure = None, None
+    for impersonate in attempts:
+        try:
+            candidate = _open(url, impersonate)
+        except OSError as exc:  # requests' and curl_cffi's exceptions both derive from OSError
+            failure = exc
+            continue
+        if resp is not None:
+            resp.close()
+        resp = candidate
+        if resp.status_code not in BLOCKED_STATUSES:
+            break
+    if resp is None:
+        raise FetchError(f"Couldn't reach {parsed.netloc}: {failure.__class__.__name__}. Check the internet "
+                         "connection, or paste the job description instead.") from failure
     try:
-        resp = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9",
-                                          "Accept": "text/html,application/xhtml+xml"},
-                            timeout=20, stream=True, allow_redirects=True)
-    except requests.RequestException as exc:
-        raise FetchError(f"Couldn't reach {parsed.netloc}: {exc.__class__.__name__}. Check the internet "
-                         "connection, or paste the job description instead.") from exc
-    if resp.status_code in (401, 403, 429, 999):
-        raise FetchError(f"{parsed.netloc} blocked automatic reading (HTTP {resp.status_code}). Open the posting in "
-                         "a browser, copy the description, and use 'Paste description'.")
-    if resp.status_code >= 400:
-        raise FetchError(f"{parsed.netloc} returned HTTP {resp.status_code}. Check the link.")
-    if progress:
-        progress(40, "Downloading posting…")
-    chunks, size = [], 0
-    for chunk in resp.iter_content(65536):
-        size += len(chunk)
-        if size > MAX_BYTES:
-            raise FetchError("That page is unusually large; paste the description instead.")
-        chunks.append(chunk)
-    resp.encoding = resp.encoding or resp.apparent_encoding
-    page = b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
-    return page, resp.url
+        if resp.status_code in BLOCKED_STATUSES:
+            hint = "" if len(attempts) > 1 else (" (Installing the 'curl_cffi' package lets SEEK read more "
+                                                 "job boards: pip install curl_cffi)")
+            raise FetchError(f"{parsed.netloc} blocked automatic reading (HTTP {resp.status_code}). Open the "
+                             "posting in a browser, copy the description, and use 'Paste description'." + hint)
+        if resp.status_code >= 400:
+            raise FetchError(f"{parsed.netloc} returned HTTP {resp.status_code}. Check the link.")
+        if progress:
+            progress(40, "Downloading posting…")
+        chunks, size = [], 0
+        for chunk in resp.iter_content(None):  # None = as received; curl_cffi ignores sizes anyway
+            size += len(chunk)
+            if size > MAX_BYTES:
+                raise FetchError("That page is unusually large; paste the description instead.")
+            chunks.append(chunk)
+        page = _decode(b"".join(chunks), resp.headers.get("Content-Type", ""))
+        return page, str(resp.url)
+    finally:
+        resp.close()
 
 
 def split_sections(description: str) -> dict[str, list[str]]:

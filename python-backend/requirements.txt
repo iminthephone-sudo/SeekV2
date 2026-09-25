@@ -1,6 +1,8 @@
 spacy>=3.7,<4
 beautifulsoup4>=4.12
 requests>=2.31
+# Browser-grade TLS for URL import; without it many job boards answer HTTP 403.
+curl_cffi>=0.7
 python-docx>=1.1
 # After installing, fetch the English pipeline once:
 #   python -m spacy download en_core_web_sm
