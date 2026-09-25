@@ -61,6 +61,8 @@ SEEK/
 ```
 
 Nothing is uploaded. The only network access is `job.fetch`, which downloads the posting a staff member asked for.
+When a site blocks that download (Indeed), the shell opens the same posting in its built-in browser
+(Qt WebEngine, `ui/BrowserImportDialog`) and hands the rendered page to `job.from_html`.
 
 ## AI / NLP
 

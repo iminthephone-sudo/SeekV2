@@ -13,7 +13,7 @@ Everything runs **locally**; participant data never leaves the computer.
 | **Multiple profiles** | Keep many participants, each with several resume profiles ("Warehouse", "Kitchen"…), grouped by participant. Duplicate a profile to tailor it; mark one active. |
 | **Resume builder** | Three templates (Classic, Modern, Compact) with a live preview. Export to PDF, Word, HTML, plain text (for online forms) or Markdown. |
 | **AI coaching (spaCy)** | Scores the resume and reviews every bullet (action verb? numbers? weak opener?). Suggests skills the experience already demonstrates. |
-| **Job posting import** | Paste a link: SEEK reads the posting (schema.org JSON-LD or page text), extracts ranked keywords, and flags *fair-chance*, background-check, drug-screen and exclusion language. If a site blocks it, paste the description instead. |
+| **Job posting import** | Paste a link: SEEK reads the posting (schema.org JSON-LD or page text), extracts ranked keywords, and flags *fair-chance*, background-check, drug-screen and exclusion language. Sites that block automated reading (Indeed) open in a built-in browser and import from there; paste the description as a last resort. |
 | **Keyword optimizer** | Match score against a posting, what's covered, what's missing, and the most relevant bullets. Tailors honestly: only confirmed skills are added, and the result saves as a new profile by default. |
 | **Cover letter writer** | Letters built from the participant's own best-matching bullets, skills and credentials. Choose Professional, Warm or Direct tone, and optionally add a growth paragraph that never mentions a record. Edit, save, and export to PDF, Word or text. |
 | **Interview practice** | **S.T.A.R.S** (Situation, Task, Action, Result, Skills) answers for 12 behavioral questions, or your own. Includes story ideas pulled from the profile and part-by-part spaCy coaching ("I" vs "we", concrete steps, numbers, filler words, blame words, skills tied to the posting). Produces a polished answer to rehearse. **Workplace assessment** practice has 20 agree/disagree statements like those in hourly-job applications, with coaching as you answer, trait bars, and flags for contradictions and too-good-to-be-true answers. |
@@ -48,7 +48,7 @@ QWidget-FancyUI/  reference build of the UI style SEEK follows (unchanged)
 
 ## Getting started
 
-**You need:** Python 3.10+, Qt 6.4+ (Widgets and Svg), CMake 3.16+, and a C++17 compiler.
+**You need:** Python 3.10+, Qt 6.4+ (Widgets and Svg, plus the **Qt WebEngine** component for importing from Indeed and other sites that block automated reading), CMake 3.16+, and a C++17 compiler.
 
 ### Windows
 
@@ -68,7 +68,7 @@ cmake --build shell/build -j
 shell/build/SEEK                            # finds ../python-backend automatically
 ```
 
-On Debian/Ubuntu, install Qt with `sudo apt install qt6-base-dev qt6-svg-dev libgl1-mesa-dev`.
+On Debian/Ubuntu, install Qt with `sudo apt install qt6-base-dev qt6-svg-dev qt6-webengine-dev libgl1-mesa-dev`.
 
 ### Engine only (no GUI)
 

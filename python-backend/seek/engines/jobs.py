@@ -3,8 +3,9 @@
 Most job boards embed a schema.org ``JobPosting`` block (JSON-LD) for search
 engines; that is read first because it is clean and structured. Otherwise the
 page's main text is extracted heuristically. Some large boards block automated
-requests — the engine detects that and tells staff to paste the description,
-which goes through exactly the same pipeline.
+requests — the engine reports that as ``blocked`` so the shell can open the
+posting in its built-in browser (or staff paste the description); either way the
+page goes through exactly the same pipeline.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import html as html_lib
 import json
 import re
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ..storage import Store, new_id, utc_now
 from .nlp import NLP, stem
@@ -40,6 +41,10 @@ BROWSER_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 BLOCKED_STATUSES = (401, 403, 429, 999)
+# Elements some boards put the description in; checked before the generic "densest block" guess.
+DESCRIPTION_SELECTORS = ("#jobDescriptionText",               # Indeed
+                         ".show-more-less-html__markup",      # LinkedIn
+                         "[data-automation-id=jobPostingDescription]")  # Workday
 
 SECTION_HEADINGS = {
     "responsibilities": ("responsibilities", "duties", "what you'll do", "what you will do", "the role",
@@ -65,7 +70,27 @@ EXCLUSION_PATTERNS = r"no (felon(y|ies)|convictions?|criminal record)|must not h
 
 
 class FetchError(RuntimeError):
-    """Readable error shown to staff as-is."""
+    """Readable error shown to staff as-is. ``blocked``: the site refused a non-browser client."""
+
+    def __init__(self, message: str, blocked: bool = False) -> None:
+        super().__init__(message)
+        self.blocked = blocked
+
+
+def normalize_url(url: str) -> str:
+    """Rewrite links that wrap a posting into the posting's own page.
+
+    Indeed links copied from search results (``/jobs?q=…&vjk=…``, ``/rc/clk?jk=…``) are list or
+    redirect pages; ``/viewjob?jk=`` is the posting itself. Links without a job key are left alone.
+    """
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host == "indeed.com" or host.endswith(".indeed.com"):
+        query = parse_qs(parsed.query)
+        jk = (query.get("jk") or query.get("vjk") or [""])[0]
+        if re.fullmatch(r"[0-9a-f]{16}", jk):
+            return f"https://{parsed.netloc}/viewjob?jk={jk}"
+    return url
 
 
 def _text_from_html(fragment: str) -> str:
@@ -181,6 +206,7 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
                 "description": _text_from_html(page), "source": "html"}
 
     soup = BeautifulSoup(page, "html.parser")
+    known = next((el for sel in DESCRIPTION_SELECTORS for el in soup.select(sel)), None)
 
     def meta(*names: str) -> str:
         for n in names:
@@ -196,8 +222,8 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
     company = meta("og:site_name")
     for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "form", "svg", "iframe"]):
         tag.decompose()
-    candidates = soup.find_all(["main", "article", "section", "div"])
-    best, best_len = soup.body or soup, 0
+    candidates = [] if known else soup.find_all(["main", "article", "section", "div"])
+    best, best_len = known or soup.body or soup, 0
     for cand in candidates:
         text = cand.get_text(" ", strip=True)
         # Prefer dense blocks with list items: that is what job descriptions look like.
@@ -245,7 +271,7 @@ def _decode(body: bytes, content_type: str) -> str:
 
 
 def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> tuple[str, str]:
-    url = url.strip()
+    url = normalize_url(url.strip())
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise FetchError("Enter a full web address starting with http:// or https://")
@@ -277,7 +303,8 @@ def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> t
             hint = "" if len(attempts) > 1 else (" (Installing the 'curl_cffi' package lets SEEK read more "
                                                  "job boards: pip install curl_cffi)")
             raise FetchError(f"{parsed.netloc} blocked automatic reading (HTTP {resp.status_code}). Open the "
-                             "posting in a browser, copy the description, and use 'Paste description'." + hint)
+                             "posting in a browser, copy the description, and use 'Paste description'." + hint,
+                             blocked=True)
         if resp.status_code >= 400:
             raise FetchError(f"{parsed.netloc} returned HTTP {resp.status_code}. Check the link.")
         if progress:
@@ -397,6 +424,12 @@ class JobEngine:
         if progress:
             progress(85, "Finding keywords with spaCy…")
         return self._build(raw, url=final_url)
+
+    def from_html(self, html: str, url: str = "") -> dict[str, Any]:
+        """Save a posting from a page the shell loaded in its own browser (sites that block ``fetch``)."""
+        if len(html.encode("utf-8", errors="ignore")) > MAX_BYTES:
+            raise FetchError("That page is unusually large; paste the description instead.")
+        return self._build(parse_html(html, url), url=url)
 
     def from_text(self, text: str, title: str = "", company: str = "", url: str = "",
                   location: str = "") -> dict[str, Any]:

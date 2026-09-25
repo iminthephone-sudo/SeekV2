@@ -29,7 +29,7 @@ from typing import Any, Callable, TextIO
 from . import __version__
 from .engines import fair_chance, resume
 from .engines.cover_letter import TONES, CoverLetterEngine
-from .engines.jobs import STATUSES, FetchError, JobEngine
+from .engines.jobs import STATUSES, FetchError, JobEngine, normalize_url
 from .engines.nlp import NLP, get_nlp
 from .engines.interview import InterviewEngine
 from .engines.optimizer import OptimizerEngine
@@ -96,6 +96,8 @@ class SeekService:
                 self.profiles.get(profile_id), int(gap_months)),
             "fairchance.guidance": lambda: fair_chance.GUIDANCE,
             "job.fetch": lambda url: self.jobs.fetch(url, self._progress),
+            "job.from_html": self.jobs.from_html,
+            "job.page_url": lambda url: normalize_url(url.strip()),
             "job.from_text": self.jobs.from_text,
             "job.list": self.jobs.list,
             "job.get": self.jobs.get,
@@ -181,7 +183,7 @@ class SeekService:
         except BridgeError:
             raise
         except FetchError as exc:
-            raise BridgeError("fetch_failed", str(exc)) from exc
+            raise BridgeError("fetch_blocked" if exc.blocked else "fetch_failed", str(exc)) from exc
         except KeyError as exc:
             raise BridgeError("not_found", str(exc.args[0]) if exc.args else "not found") from exc
         except (ValueError, TypeError) as exc:

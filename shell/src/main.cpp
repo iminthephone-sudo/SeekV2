@@ -19,6 +19,9 @@
 
 int main(int argc, char* argv[]) {
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#ifdef SEEK_HAS_WEBENGINE
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);  // Qt WebEngine requires it before QApplication
+#endif
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("SEEK"));
     // Screenshot runs keep their own settings so they never touch a real user's preferences.

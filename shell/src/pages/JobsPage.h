@@ -22,6 +22,9 @@ public:
 
 private:
     void fetch();
+    void importInBrowser(const QString& url);
+    void imported(const QJsonObject& job);
+    void offerPaste();
     void analyzePaste();
     void rebuildList();
     void showJob(const QString& id);

@@ -93,11 +93,73 @@ def test_blocked_everywhere_reports_block_not_network(board, monkeypatch):
 
     monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: True)
     monkeypatch.setattr(jobs, "_open", open_then_fail)
-    with pytest.raises(jobs.FetchError, match=r"blocked automatic reading \(HTTP 403\)"):
+    with pytest.raises(jobs.FetchError, match=r"blocked automatic reading \(HTTP 403\)") as err:
         jobs.fetch_url(board + "/always-blocked")
+    assert err.value.blocked  # lets the shell offer its built-in browser instead
 
 
 def test_block_message_suggests_curl_cffi_when_missing(board, monkeypatch):
     monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: False)
     with pytest.raises(jobs.FetchError, match="pip install curl_cffi"):
         jobs.fetch_url(board + "/always-blocked")
+
+
+def test_unreachable_is_not_blocked(monkeypatch):
+    monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: False)
+    with pytest.raises(jobs.FetchError, match="Couldn't reach") as err:
+        jobs.fetch_url("http://127.0.0.1:9/job")  # nothing listens on the discard port
+    assert not err.value.blocked
+
+
+@pytest.mark.parametrize("link", [
+    "https://www.indeed.com/viewjob?jk=0123456789abcdef&from=serp&vjs=3",
+    "https://www.indeed.com/jobs?q=warehouse&l=Denver%2C+CO&vjk=0123456789abcdef",
+    "https://www.indeed.com/rc/clk?jk=0123456789abcdef&bb=xyz&fccid=abc",
+    "https://www.indeed.com/m/viewjob?jk=0123456789abcdef",
+])
+def test_indeed_links_point_at_the_posting(link):
+    assert jobs.normalize_url(link) == "https://www.indeed.com/viewjob?jk=0123456789abcdef"
+
+
+def test_other_links_unchanged():
+    for link in ("https://ca.indeed.com/jobs?q=cook", "https://careers.example.com/jobs/1?jk=0123456789abcdef"):
+        assert jobs.normalize_url(link) == link
+
+
+INDEED_PAGE = """<html><head><title>Warehouse Associate - Denver, CO - Indeed.com</title></head><body>
+<nav>""" + " ".join(f"<a href='/q{i}'>Related search {i}</a>" for i in range(80)) + """</nav>
+<div class="related">""" + "<p>Similar job: Forklift operator in Aurora, apply today with one click.</p>" * 30 + """</div>
+<h1 class="jobsearch-JobInfoHeader-title">Warehouse Associate</h1>
+<div id="jobDescriptionText"><p>Join our Denver distribution team.</p>
+<h2>Responsibilities</h2><ul><li>Pick, pack and ship customer orders accurately</li>
+<li>Operate pallet jacks and RF scanners safely</li><li>Keep the work area clean and organized</li></ul>
+<h2>Requirements</h2><ul><li>Able to lift 50 pounds</li><li>Forklift certification a plus</li></ul>
+<p>We are a fair chance employer and consider applicants with criminal records.</p></div>
+</body></html>"""
+
+
+def test_from_html_uses_indeed_description(tmp_path):
+    from seek.bridge import SeekService
+    from seek.engines.nlp import get_nlp
+    from seek.storage import Store
+
+    service = SeekService(Store(tmp_path), get_nlp())
+    job = service.call("job.from_html", {"html": INDEED_PAGE,
+                                         "url": "https://www.indeed.com/viewjob?jk=0123456789abcdef"})
+    assert job["title"] == "Warehouse Associate"
+    assert "Pick, pack and ship" in job["description"]
+    assert "Similar job" not in job["description"]  # the bigger unrelated block isn't chosen
+    assert job["signals"]["fair_chance"]
+    assert job["url"].endswith("jk=0123456789abcdef")
+
+
+def test_bridge_reports_blocked_code(tmp_path, board, monkeypatch):
+    from seek.bridge import BridgeError, SeekService
+    from seek.engines.nlp import get_nlp
+    from seek.storage import Store
+
+    monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: False)
+    service = SeekService(Store(tmp_path), get_nlp())
+    with pytest.raises(BridgeError) as err:
+        service.call("job.fetch", {"url": board + "/always-blocked"})
+    assert err.value.code == "fetch_blocked"

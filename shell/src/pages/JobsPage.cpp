@@ -21,6 +21,7 @@
 
 #include "core/AppContext.h"
 #include "core/Theme.h"
+#include "ui/BrowserImportDialog.h"
 
 namespace {
 const QStringList kStatuses = {"saved", "applying", "applied", "interview", "offer", "hired", "closed"};
@@ -233,26 +234,50 @@ void JobsPage::fetch() {
     m_progress->show();
     m_progressText->setText(tr("Starting…"));
     m_progressText->show();
-    m_fetchRequest = m_ctx->bridge()->call("job.fetch", {{"url", url}}, [this](const QJsonValue& r, const BridgeError& e) {
+    m_fetchRequest = m_ctx->bridge()->call("job.fetch", {{"url", url}}, [this, url](const QJsonValue& r, const BridgeError& e) {
         m_fetch->setEnabled(true);
         m_progress->hide();
         m_progressText->hide();
         m_fetchRequest.clear();
         if (e.isError()) {
+            // The site turned away SEEK's downloader (Indeed does); a real browser gets through.
+            if (e.code == "fetch_blocked" && BrowserImportDialog::available()) return importInBrowser(url);
             m_ctx->toast(e.message, AppContext::ToastKind::Warning);
-            if (e.code == "fetch_failed") {
-                m_pasteCard->show();
-                m_pasteText->setFocus();
-            }
+            if (e.code == "fetch_failed" || e.code == "fetch_blocked") offerPaste();
             return;
         }
-        m_url->clear();
-        const QJsonObject job = r.toObject();
-        m_ctx->toast(tr("Imported “%1” — %2 keywords found.").arg(job.value("title").toString())
-                         .arg(job.value("keywords").toArray().size()), AppContext::ToastKind::Success);
-        m_ctx->refreshJobs();
-        populate(job);
+        imported(r.toObject());
     }, this);
+}
+
+void JobsPage::importInBrowser(const QString& url) {
+    m_ctx->bridge()->call("job.page_url", {{"url", url}}, [this, url](const QJsonValue& r, const BridgeError& e) {
+        auto* dlg = new BrowserImportDialog(QUrl(e.isError() ? url : r.toString()), this);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dlg, &BrowserImportDialog::pageCaptured, this, [this](const QString& html, const QUrl& pageUrl) {
+            const QJsonObject params{{"html", html}, {"url", pageUrl.toString()}};
+            m_ctx->bridge()->call("job.from_html", params, [this](const QJsonValue& job, const BridgeError& err) {
+                if (!err.isError()) return imported(job.toObject());
+                m_ctx->toast(err.message, AppContext::ToastKind::Warning);
+                offerPaste();
+            }, this);
+        });
+        connect(dlg, &QDialog::rejected, this, &JobsPage::offerPaste);
+        dlg->open();
+    }, this);
+}
+
+void JobsPage::imported(const QJsonObject& job) {
+    m_url->clear();
+    m_ctx->toast(tr("Imported “%1” — %2 keywords found.").arg(job.value("title").toString())
+                     .arg(job.value("keywords").toArray().size()), AppContext::ToastKind::Success);
+    m_ctx->refreshJobs();
+    populate(job);
+}
+
+void JobsPage::offerPaste() {
+    m_pasteCard->show();
+    m_pasteText->setFocus();
 }
 
 void JobsPage::analyzePaste() {

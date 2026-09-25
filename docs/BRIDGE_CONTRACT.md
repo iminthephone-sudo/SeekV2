@@ -65,7 +65,8 @@ they are flushed once `ready` arrives.
 | `invalid_params` | Params don't match the method signature |
 | `invalid` | Params had the right shape but a bad value (bad id, bad status, unsupported format) |
 | `not_found` | Profile / job / letter doesn't exist |
-| `fetch_failed` | URL import failed; the message is written for staff (e.g. "site blocked automatic reading — paste the description") |
+| `fetch_failed` | URL import failed (bad link, unreachable, no description found); the message is written for staff |
+| `fetch_blocked` | The site refused a non-browser client (HTTP 401/403/429/999). The shell opens the posting in its built-in browser and sends the page to `job.from_html`; without Qt WebEngine it shows the message and the paste box |
 | `engine_error` | Engine-side failure with a readable message (e.g. python-docx missing) |
 | `internal` | Unexpected exception (traceback on stderr) |
 | `engine_stopped` | Produced by the **shell** when the process isn't running or died mid-request |
@@ -108,6 +109,8 @@ Every id is `[A-Za-z0-9_-]{1,64}`. Anything else is rejected before touching the
 | Method | Params | Result |
 |---|---|---|
 | `job.fetch` | `url` | saved job (emits `SEEK_PROGRESS`) |
+| `job.from_html` | `html`, `url?` | saved job, from a page the shell loaded in its built-in browser |
+| `job.page_url` | `url` | the link to open for a posting (Indeed search/click links become `/viewjob?jk=`) |
 | `job.from_text` | `text`, `title?`, `company?`, `location?`, `url?` | saved job |
 | `job.list` / `job.get` / `job.delete` | – / `job_id` / `job_id` | |
 | `job.update` | `job_id`, `changes` (`status`, `notes`, `title`, `company`, `description`…) | updated job |
