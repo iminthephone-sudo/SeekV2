@@ -172,7 +172,7 @@ Severity: **H** high · **M** medium · **L** low.
 1. Pull `claude/beautiful-bohr-k6x0aa`.
 2. Reinstall the engine's packages: `scripts\setup_backend.ps1`. `curl_cffi` is new.
 3. In the Qt Maintenance Tool, add **Qt WebEngine** to your `msvc2019_64` kit.
-4. Rebuild: `scripts\build_windows.ps1 -QtDir C:\Qt\<version>\msvc2019_64`. The build output should say *"Qt WebEngine found"*.
+4. Rebuild: `.\scripts\build_windows.ps1`. It finds the newest Qt MSVC kit in `C:\Qt` or `D:\Qt` by itself, or takes `-QtDir D:\Qt\6.10.2`. It prints the kit it uses and whether Qt WebEngine is installed.
 5. First live checks:
    - sign a test profile in to LinkedIn and Indeed and press **Check**
    - run a search on both sites

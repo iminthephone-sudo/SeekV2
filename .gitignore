@@ -10,3 +10,6 @@ build/
 shell/build/
 *.user
 CMakeLists.txt.user
+
+# Windows build output (scripts/build_windows.ps1)
+dist/

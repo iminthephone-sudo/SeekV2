@@ -55,8 +55,10 @@ QWidget-FancyUI/  reference build of the UI style SEEK follows (unchanged)
 ### Windows
 
 ```powershell
-# 1. Build the shell and package it into .\dist (also sets up the Python engine there)
-.\scripts\build_windows.ps1 -QtDir C:\Qt\6.7.2\msvc2019_64
+# 1. Build the shell and package it into .\dist (also sets up the Python engine there).
+#    Finds the newest Qt MSVC kit in C:\Qt or D:\Qt; or point it at one: -QtDir D:\Qt\6.10.2
+#    (a Qt root, version folder or kit folder all work). -ShowQt only shows which kit it would use.
+.\scripts\build_windows.ps1
 # 2. Run
 .\dist\SEEK.exe
 ```
