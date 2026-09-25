@@ -14,8 +14,13 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 # Optional built-in browser for importing postings from sites that block automated downloads
-# (Indeed). In the Qt online installer/Maintenance Tool it is the "Qt WebEngine" component.
-find_package(Qt6 QUIET OPTIONAL_COMPONENTS WebEngineWidgets)
+# (Indeed), job search and LinkedIn/Indeed sign-ins. In the Qt Maintenance Tool it is "Qt WebEngine",
+# which also needs "Qt WebChannel" and "Qt Positioning" of the same Qt version.
+# Not QUIET: when WebEngine is installed but can't be loaded, Qt's own warning says why.
+option(SEEK_WEBENGINE "Build the built-in browser when Qt WebEngine is available" ON)
+if (SEEK_WEBENGINE)
+    find_package(Qt6 OPTIONAL_COMPONENTS WebEngineWidgets)
+endif ()
 
 file(GLOB_RECURSE SEEK_SOURCES CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/src/*.h"
@@ -25,12 +30,30 @@ qt_add_executable(SEEK WIN32 MACOSX_BUNDLE ${SEEK_SOURCES} resources/seek.qrc)
 
 target_include_directories(SEEK PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(SEEK PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
+set(SEEK_WEBENGINE_MISSING "" CACHE INTERNAL "Qt modules the built-in browser needs but couldn't load")
 if (TARGET Qt6::WebEngineWidgets)
     target_link_libraries(SEEK PRIVATE Qt6::WebEngineWidgets)
     target_compile_definitions(SEEK PRIVATE SEEK_HAS_WEBENGINE)
+    set(SEEK_WEBENGINE_BUILT ON CACHE INTERNAL "Built with the built-in browser")
     message(STATUS "SEEK: Qt WebEngine found - blocked job sites open in the built-in browser")
 else ()
-    message(WARNING "SEEK: Qt WebEngine not found - blocked job sites (Indeed) fall back to 'Paste description'")
+    set(SEEK_WEBENGINE_BUILT OFF CACHE INTERNAL "Built with the built-in browser")
+    if (SEEK_WEBENGINE)
+        # Find out which of WebEngine's own dependencies is the problem: each is a separate Qt component.
+        set(_seek_missing "")
+        foreach (_m WebEngineWidgets WebEngineCore WebChannel Positioning Quick QuickWidgets Qml PrintSupport Network)
+            find_package(Qt6 QUIET OPTIONAL_COMPONENTS ${_m})
+            if (NOT Qt6${_m}_FOUND)
+                list(APPEND _seek_missing "Qt${_m}")
+            endif ()
+        endforeach ()
+        set(SEEK_WEBENGINE_MISSING "${_seek_missing}" CACHE INTERNAL "Qt modules the built-in browser needs but couldn't load")
+        message(WARNING "SEEK: Qt WebEngine could not be loaded, so the built-in browser is OFF. "
+                        "Modules that failed to load: ${_seek_missing}. Add the missing ones for Qt ${Qt6_VERSION} "
+                        "with the Qt Maintenance Tool (they must be the same version as Qt).")
+    else ()
+        message(STATUS "SEEK: built-in browser turned off (SEEK_WEBENGINE=OFF)")
+    endif ()
 endif ()
 
 # Lets a development build find the engine pack in the source tree without copying it.
