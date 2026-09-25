@@ -25,6 +25,10 @@ SECTION_FIELDS: dict[str, list[str]] = {
     "references": ["name", "relationship", "phone", "email"],
 }
 CONTACT_FIELDS = ["full_name", "email", "phone", "city", "state", "linkedin", "website"]
+# Job sites a profile can be signed in to (through the shell's built-in browser). SEEK stores only the
+# status; the site's own sign-in cookie stays in that browser's storage for this profile.
+ACCOUNT_SITES = {"linkedin": "LinkedIn", "indeed": "Indeed"}
+ACCOUNT_STATUSES = ("signed_in", "signed_out", "unknown")
 TEMPLATES = ["classic", "modern", "compact"]
 
 
@@ -44,6 +48,7 @@ def blank_profile(name: str = "New profile", participant: str = "") -> dict[str,
         **{section: [] for section in SECTION_FIELDS},
         "notes": "",
         "options": {"template": "classic", "include_references": False, "references_on_request": True},
+        "accounts": {},
     }
 
 
@@ -91,6 +96,11 @@ def normalize(profile: dict[str, Any]) -> dict[str, Any]:
     if options.get("template") not in TEMPLATES:
         options["template"] = "classic"
     out["options"] = options
+    accounts = {}
+    for site, info in (profile.get("accounts") or {}).items():
+        if site in ACCOUNT_SITES and isinstance(info, dict) and info.get("status") in ACCOUNT_STATUSES:
+            accounts[site] = {"status": info["status"], "checked_at": _clean_text(info.get("checked_at"))}
+    out["accounts"] = accounts
     return out
 
 
@@ -159,6 +169,7 @@ class ProfileEngine:
         source = copy.deepcopy(self._require(profile_id))
         source["name"] = name or f"{source.get('name', 'Profile')} (copy)"
         source.pop("id", None)
+        source.pop("accounts", None)  # the copy has its own (empty) browser storage, so it starts signed out
         clone = self.create(source["name"], source.get("participant", ""), source)
         self.store.append_history("profile", f"Duplicated '{self._require(profile_id)['name']}' as '{clone['name']}'",
                                   profile_id=clone["id"], source_id=profile_id)
@@ -168,6 +179,22 @@ class ProfileEngine:
         self._require(profile_id)
         self.store.update_settings(active_profile=profile_id)
         return {"active_profile": profile_id}
+
+    def set_account(self, profile_id: str, site: str, status: str) -> dict[str, Any]:
+        """Record whether this profile is signed in to a job site (the shell checks; the engine remembers)."""
+        if site not in ACCOUNT_SITES:
+            raise ValueError(f"site must be one of {sorted(ACCOUNT_SITES)}")
+        if status not in ACCOUNT_STATUSES:
+            raise ValueError(f"status must be one of {list(ACCOUNT_STATUSES)}")
+        profile = self._require(profile_id)
+        before = (profile.get("accounts") or {}).get(site, {}).get("status")
+        profile.setdefault("accounts", {})[site] = {"status": status, "checked_at": utc_now()}
+        self.store.put(COLLECTION, profile_id, profile)
+        if before != status and status != "unknown":
+            verb = "Signed in to" if status == "signed_in" else "Signed out of"
+            self.store.append_history("profile", f"{verb} {ACCOUNT_SITES[site]} for '{profile.get('name')}'",
+                                      profile_id=profile_id, site=site)
+        return profile["accounts"]
 
     def active(self) -> dict[str, Any] | None:
         pid = self.store.settings().get("active_profile")

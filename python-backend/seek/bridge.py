@@ -34,6 +34,7 @@ from .engines.nlp import NLP, get_nlp
 from .engines.interview import InterviewEngine
 from .engines.record_coach import RecordCoach
 from .engines.writing import WritingAssist
+from .engines.search import SOURCES as SEARCH_SOURCES, SearchEngine
 from .engines.optimizer import OptimizerEngine
 from .engines.profiles import CONTACT_FIELDS, SECTION_FIELDS, TEMPLATES, ProfileEngine
 from .storage import Store
@@ -75,6 +76,7 @@ class SeekService:
         self.interview = InterviewEngine(self.store, self.nlp)
         self.record_coach = RecordCoach(self.store, self.nlp)
         self.writing = WritingAssist(self.store, self.nlp, self.profiles)
+        self.search = SearchEngine(self.store)
         self.shutdown_requested = False
         self._progress: Callable[[int, str], None] = lambda pct, msg: None
         self.methods: dict[str, Callable[..., Any]] = {
@@ -92,6 +94,7 @@ class SeekService:
             "profile.delete": self.profiles.delete,
             "profile.duplicate": self.profiles.duplicate,
             "profile.set_active": self.profiles.set_active,
+            "profile.set_account": self.profiles.set_account,
             "profile.active": self.profiles.active,
             "resume.render": self.resume_render,
             "resume.export": self.resume_export,
@@ -102,6 +105,10 @@ class SeekService:
             "job.fetch": lambda url: self.jobs.fetch(url, self._progress),
             "job.from_html": self.jobs.from_html,
             "job.page_url": lambda url: normalize_url(url.strip()),
+            "search.sources": lambda: SEARCH_SOURCES,
+            "search.run": lambda query, location="", sources=None, page=0, fair_chance=False, direct=None:
+                self.search.search(query, location, sources, page, fair_chance, direct, self._progress),
+            "search.parse": self.search.parse,
             "job.from_text": self.jobs.from_text,
             "job.list": self.jobs.list,
             "job.get": self.jobs.get,

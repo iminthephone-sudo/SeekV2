@@ -43,8 +43,15 @@ BROWSER_HEADERS = {
 BLOCKED_STATUSES = (401, 403, 429, 999)
 # Elements some boards put the description in; checked before the generic "densest block" guess.
 DESCRIPTION_SELECTORS = ("#jobDescriptionText",               # Indeed
-                         ".show-more-less-html__markup",      # LinkedIn
+                         ".show-more-less-html__markup",      # LinkedIn (guest page)
+                         "#job-details", ".jobs-description__content",  # LinkedIn (signed in)
                          "[data-automation-id=jobPostingDescription]")  # Workday
+# Known places for the title / company / location on boards whose pages lack JSON-LD.
+TITLE_SELECTORS = ("h1", ".top-card-layout__title", ".topcard__title", ".jobsearch-JobInfoHeader-title")
+COMPANY_SELECTORS = ("[data-testid=inlineHeader-companyName]", "[data-company-name]", ".topcard__org-name-link",
+                     ".job-details-jobs-unified-top-card__company-name", "[data-automation-id=company]")
+LOCATION_SELECTORS = ("[data-testid=inlineHeader-companyLocation]", "[data-testid=job-location]",
+                      ".topcard__flavor--bullet", "[data-automation-id=locations]")
 
 SECTION_HEADINGS = {
     "responsibilities": ("responsibilities", "duties", "what you'll do", "what you will do", "the role",
@@ -90,7 +97,30 @@ def normalize_url(url: str) -> str:
         jk = (query.get("jk") or query.get("vjk") or [""])[0]
         if re.fullmatch(r"[0-9a-f]{16}", jk):
             return f"https://{parsed.netloc}/viewjob?jk={jk}"
+    job_id = linkedin_job_id(url)
+    if job_id:
+        return f"https://www.linkedin.com/jobs/view/{job_id}/"
     return url
+
+
+def linkedin_job_id(url: str) -> str:
+    """The numeric posting id from any LinkedIn job link (view page, search page, guest API), or ""."""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+        return ""
+    current = parse_qs(parsed.query).get("currentJobId", [""])[0]
+    if current.isdigit():
+        return current
+    m = re.search(r"/jobs(?:-guest/jobs/api/jobPosting|/view)/(?:[^/?#]*?-)?(\d{6,})(?:[/?#]|$)", parsed.path + "/")
+    return m.group(1) if m else ""
+
+
+def download_url(url: str) -> str:
+    """Where to download a posting from. LinkedIn serves job pages to signed-out visitors through its guest
+    endpoint; the normal view page answers bots with HTTP 999."""
+    job_id = linkedin_job_id(url)
+    return f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}" if job_id else url
 
 
 def _text_from_html(fragment: str) -> str:
@@ -215,11 +245,18 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
                 return tag["content"].strip()
         return ""
 
-    title = meta("og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else "")
-    h1 = soup.find("h1")
-    if h1 and h1.get_text(strip=True):
-        title = h1.get_text(" ", strip=True)
-    company = meta("og:site_name")
+    def first_text(selectors: tuple[str, ...]) -> str:
+        for sel in selectors:
+            for el in soup.select(sel):
+                text = el.get_text(" ", strip=True)
+                if text:
+                    return text
+        return ""
+
+    title = first_text(TITLE_SELECTORS) or meta("og:title", "twitter:title") or \
+        (soup.title.get_text(strip=True) if soup.title else "")
+    company = first_text(COMPANY_SELECTORS) or meta("og:site_name")
+    location = first_text(LOCATION_SELECTORS)
     for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "form", "svg", "iframe"]):
         tag.decompose()
     candidates = [] if known else soup.find_all(["main", "article", "section", "div"])
@@ -234,7 +271,7 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
         if score > best_len and len(text) < 40000:
             best, best_len = cand, score
     return {
-        "title": title, "company": company, "location": "", "employment_type": "", "salary": "",
+        "title": title, "company": company, "location": location, "employment_type": "", "salary": "",
         "date_posted": "", "description": _text_from_html(str(best)), "source": "html",
     }
 
@@ -271,7 +308,7 @@ def _decode(body: bytes, content_type: str) -> str:
 
 
 def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> tuple[str, str]:
-    url = normalize_url(url.strip())
+    url = url.strip()  # callers normalize first (JobEngine.fetch); this downloads exactly what it's given
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise FetchError("Enter a full web address starting with http:// or https://")
@@ -417,19 +454,22 @@ class JobEngine:
         return out[:40]
 
     def fetch(self, url: str, progress: Callable[[int, str], None] | None = None) -> dict[str, Any]:
-        page, final_url = fetch_url(url, progress)
+        canonical = normalize_url(url.strip())
+        source = download_url(canonical)
+        page, final_url = fetch_url(source, progress)
         if progress:
             progress(65, "Reading the posting…")
         raw = parse_html(page, final_url)
         if progress:
             progress(85, "Finding keywords with spaCy…")
-        return self._build(raw, url=final_url)
+        # Keep the link staff can open, not the guest API it was downloaded from.
+        return self._build(raw, url=canonical if source != canonical else final_url)
 
     def from_html(self, html: str, url: str = "") -> dict[str, Any]:
         """Save a posting from a page the shell loaded in its own browser (sites that block ``fetch``)."""
         if len(html.encode("utf-8", errors="ignore")) > MAX_BYTES:
             raise FetchError("That page is unusually large; paste the description instead.")
-        return self._build(parse_html(html, url), url=url)
+        return self._build(parse_html(html, url), url=normalize_url(url) if url else url)
 
     def from_text(self, text: str, title: str = "", company: str = "", url: str = "",
                   location: str = "") -> dict[str, Any]:

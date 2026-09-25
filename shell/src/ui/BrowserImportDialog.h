@@ -1,36 +1,93 @@
 #pragma once
 
-// Built-in browser for importing postings from sites that refuse non-browser clients (Indeed's
-// Cloudflare check, for one). The page loads in Qt WebEngine — a real Chromium — so the check
-// passes on its own or with one "I'm human" tick, and the rendered HTML goes to the engine's
-// `job.from_html`. Needs Qt WebEngine at build time; without it available() is false and the
-// Jobs page falls back to "Paste description".
+// Built-in browser (Qt WebEngine — a real Chromium) for sites that refuse non-browser
+// clients, such as Indeed's Cloudflare check. Pages load with the SEEK profile's own
+// browser session (see WebSessions), so a LinkedIn/Indeed sign-in carries over.
+//
+//  * BrowserImportDialog — shows a page and captures its rendered HTML once the thing
+//    we want (a job description, a results list) is on screen, or on "Import this page".
+//  * SiteSignInDialog    — the site's own sign-in page; SEEK never sees the password.
+//  * PageGrabber         — loads a page without a window and captures it (search results).
+//
+// Without Qt WebEngine at build time, WebSessions::available() is false and callers fall
+// back to "Paste description".
 
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QUrl>
 
 class QLabel;
 class QPushButton;
 class QTimer;
+class QWebEnginePage;
 class QWebEngineView;
 
 class BrowserImportDialog : public QDialog {
     Q_OBJECT
 public:
-    static bool available();
-    explicit BrowserImportDialog(const QUrl& url, QWidget* parent = nullptr);
+    struct Options {
+        QString detectJs;  // JS expression: true once the page has what we want
+        QString intro;     // shown above the page
+        QString action;    // capture button text
+    };
+    static Options postingOptions(const QString& host);
+    static Options searchOptions(const QString& host);
+
+    BrowserImportDialog(const QUrl& url, const QString& seekProfileId, const Options& options, QWidget* parent = nullptr);
 
 signals:
     // Emitted once, just before the dialog accepts.
     void pageCaptured(const QString& html, const QUrl& url);
 
 private:
-    void checkForPosting();
+    void checkPage();
     void capture();
 
+    Options m_options;
     QWebEngineView* m_view = nullptr;
     QLabel* m_status = nullptr;
     QPushButton* m_import = nullptr;
     QTimer* m_poll = nullptr;
     bool m_captured = false;
+};
+
+class SiteSignInDialog : public QDialog {
+    Q_OBJECT
+public:
+    SiteSignInDialog(const QString& siteKey, const QString& seekProfileId, QWidget* parent = nullptr);
+
+signals:
+    // "signed_in" | "signed_out" | "unknown", emitted once when the dialog closes after sign-in.
+    void finishedWith(const QString& status);
+
+private:
+    void finish(const QString& status);
+
+    QString m_site;
+    QString m_profileId;
+    QWebEngineView* m_view = nullptr;
+    QLabel* m_status = nullptr;
+    bool m_done = false;
+};
+
+class PageGrabber : public QObject {
+    Q_OBJECT
+public:
+    // Starts loading immediately; deletes itself after emitting captured() or failed().
+    PageGrabber(const QUrl& url, const QString& seekProfileId, const QString& detectJs, int timeoutMs, QObject* parent);
+
+signals:
+    void captured(const QString& html, const QUrl& url);
+    void failed(const QString& reason);  // "challenge" (a human check is showing) or "timeout"
+
+private:
+    void poll();
+    void done();
+
+    QWebEnginePage* m_page = nullptr;
+    QString m_detectJs;
+    QTimer* m_poll = nullptr;
+    QTimer* m_timeout = nullptr;
+    QElapsedTimer m_started;
+    bool m_finished = false;
 };

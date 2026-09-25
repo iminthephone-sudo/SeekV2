@@ -95,6 +95,14 @@ Every id is `[A-Za-z0-9_-]{1,64}`. Anything else is rejected before touching the
 | `profile.duplicate` | `profile_id`, `name?` | the copy |
 | `profile.delete` | `profile_id` | `{deleted}` |
 | `profile.set_active` / `profile.active` | `profile_id` / – | active profile |
+| `profile.set_account` | `profile_id`, `site` = `linkedin`\|`indeed`, `status` = `signed_in`\|`signed_out`\|`unknown` | `accounts{site:{status, checked_at}}` — the shell checks the sign-in in its browser; the engine only remembers the status (never a password) |
+
+### Writing help (spaCy)
+| Method | Params | Result |
+|---|---|---|
+| `assist.summary` | `profile_id`, `job_id?`, `text?`, `data?` (unsaved editor values) | `{facts, review[{kind, message}], drafts[{label, text, words}], note}` |
+| `assist.duties` | `title?`, `bullets[]`, `current?`, `job_id?` | `{occupation, tense, bullets[{original, rewrite, changes[], warnings[], needs_number, review}], suggestions[{text, source}], note}` |
+| `assist.rewrite_bullet` | `text`, `past?`, `placeholder?` | one rewritten bullet (as in `assist.duties`) |
 
 ### Resume
 | Method | Params | Result |
@@ -110,6 +118,9 @@ Every id is `[A-Za-z0-9_-]{1,64}`. Anything else is rejected before touching the
 |---|---|---|
 | `job.fetch` | `url` | saved job (emits `SEEK_PROGRESS`) |
 | `job.from_html` | `html`, `url?` | saved job, from a page the shell loaded in its built-in browser |
+| `search.run` | `query`, `location?`, `sources?` (`linkedin`, `indeed`), `page?`, `fair_chance?`, `direct?` | `{results[{source, id, title, company, location, posted, posted_date, salary, snippet, url, saved}], browser[{source, url}], errors[{source, message}]}` — sources not in `direct`, or that block the download, come back under `browser` for the shell to load (emits `SEEK_PROGRESS`) |
+| `search.parse` | `source`, `html` | `{results[…]}` from a search page the shell loaded in its browser |
+| `search.sources` | – | `{linkedin:{label, per_page}, indeed:{…}}` |
 | `job.page_url` | `url` | the link to open for a posting (Indeed search/click links become `/viewjob?jk=`) |
 | `job.from_text` | `text`, `title?`, `company?`, `location?`, `url?` | saved job |
 | `job.list` / `job.get` / `job.delete` | – / `job_id` / `job_id` | |
@@ -139,7 +150,10 @@ A job record includes `keywords[{term, key, score, kind: skill|phrase, category,
 | `interview.stars_coach` | `question_id` (or `custom`), `answers{situation, task, action, result, skills}`, `custom_question?`, `job_id?`, `profile_id?`, `save?` | `{score, grade, parts{<part>:{score, words, good[], feedback[]}}, notes[], next_step, polished, word_count, speaking_seconds, record?}` |
 | `interview.assessment_items` | – | `{traits{key:{label, about}}, items[{id, trait, text, reverse, pair?, absolute?, coaching}], scale[5]}` |
 | `interview.assessment_score` | `answers{item_id: 1..5}`, `profile_id?`, `save?` | `{traits[{key, label, score}], items[{id, answer, fit: strong\|ok\|concern, coaching}], flags[{kind: inconsistent\|too_good\|same_answer\|integrity, message}], consistency, strengths[], growth[], tips[], record?}` |
-| `interview.saved` / `interview.delete` | `profile_id?`, `type?` = `stars`\|`assessment` / `record_id` | saved practice, newest first |
+| `interview.record_questions` | – | `{questions[{id, category, question, looking_for, tip, example, moves[]}], elements[{key, label, hint}], legal_note}` |
+| `interview.record_coach` | `question_id` (or `custom`), `answer`, `custom_question?`, `profile_id?`, `save?` | `{score, grade, elements[{key, label, present, score, feedback, sentences[]}], issues[{kind, message, found}], outline[…], sentences[{text, moves[], tense}], proof[], next_step, legal_note, word_count, speaking_seconds, record?}` |
+| `interview.record_proof` | `profile_id` | `[{kind, text, sentence}]` — certificates, training and work to cite as proof of change (never a facility name) |
+| `interview.saved` / `interview.delete` | `profile_id?`, `type?` = `stars`\|`assessment`\|`record` / `record_id` | saved practice, newest first |
 
 ### History
 | Method | Params | Result |

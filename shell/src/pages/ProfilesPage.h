@@ -34,6 +34,9 @@ private:
     void deleteProfile();
     void suggestSkills();
     void addSkill(const QString& skill);
+    QWidget* buildSitesTab();
+    void refreshSites();
+    void recordSiteStatus(const QString& site, const QString& status);
 
     AppContext* m_ctx;
     QTreeWidget* m_tree;
@@ -55,6 +58,8 @@ private:
     QCheckBox* m_refsOnRequest;
     FlowLayout* m_suggestions;
     QHash<QString, SectionEditor*> m_sections;
+    QHash<QString, QLabel*> m_siteStatus;
+    QHash<QString, QPushButton*> m_siteSignOut;
 
     QJsonObject m_profile;
     QString m_currentId;

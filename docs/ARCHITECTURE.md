@@ -63,6 +63,10 @@ SEEK/
 Nothing is uploaded. The only network access is `job.fetch`, which downloads the posting a staff member asked for.
 When a site blocks that download (Indeed), the shell opens the same posting in its built-in browser
 (Qt WebEngine, `ui/BrowserImportDialog`) and hands the rendered page to `job.from_html`.
+Job search (`search.run`) downloads LinkedIn's public results feed; Indeed's results page loads in the built-in
+browser and comes back through `search.parse`. The built-in browser keeps one storage folder per SEEK profile
+(`core/WebSessions`), so a participant's LinkedIn/Indeed sign-in is used only for their profile; SEEK stores the
+sign-in status, never a password, and deleting a profile clears its browser cookies and cache.
 
 ## AI / NLP
 

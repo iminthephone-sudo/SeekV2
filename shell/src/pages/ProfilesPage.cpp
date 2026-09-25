@@ -3,6 +3,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -21,6 +22,8 @@
 
 #include "core/AppContext.h"
 #include "core/Theme.h"
+#include "core/WebSessions.h"
+#include "ui/BrowserImportDialog.h"
 #include "pages/SectionEditor.h"
 #include "pages/WritingHelp.h"
 
@@ -286,6 +289,8 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
                 {"email", tr("Email"), QString()}},
                tr("Always ask references first."));
 
+    m_tabs->addTab(buildSitesTab(), tr("Job sites"));
+
     // -- wiring ------------------------------------------------------------------------------
     connect(newBtn, &QPushButton::clicked, this, &ProfilesPage::newProfile);
     connect(dup, &QPushButton::clicked, this, &ProfilesPage::duplicateProfile);
@@ -393,6 +398,7 @@ void ProfilesPage::populate(const QJsonObject& p) {
     m_includeRefs->setChecked(opts.value("include_references").toBool());
     m_refsOnRequest->setChecked(opts.value("references_on_request").toBool(true));
     for (auto it = m_sections.begin(); it != m_sections.end(); ++it) it.value()->setEntries(p.value(it.key()).toArray());
+    refreshSites();
     ui::clearLayout(m_suggestions);
     const QString who = p.value("participant").toString();
     m_editorTitle->setText((who.isEmpty() ? QString() : who + " — ") + p.value("name").toString());
@@ -510,8 +516,9 @@ void ProfilesPage::deleteProfile() {
                              tr("Delete “%1”? This can't be undone.").arg(m_fields.value("name")->text()),
                              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
         return;
-    m_ctx->bridge()->call("profile.delete", {{"profile_id", m_currentId}}, [this](const QJsonValue&, const BridgeError& e) {
+    m_ctx->bridge()->call("profile.delete", {{"profile_id", m_currentId}}, [this, id = m_currentId](const QJsonValue&, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Deleting profile"), e);
+        WebSessions::instance()->forget(id);  // the participant's LinkedIn/Indeed sign-ins go with the profile
         m_currentId.clear();
         m_loading = true;
         m_editorTitle->setText(tr("Select or create a profile"));
@@ -520,6 +527,110 @@ void ProfilesPage::deleteProfile() {
         setDirty(false);
         m_ctx->refreshProfiles();
         m_ctx->toast(tr("Profile deleted."));
+    }, this);
+}
+
+// -- Job sites -------------------------------------------------------------------------------------
+QWidget* ProfilesPage::buildSitesTab() {
+    auto* page = new QWidget;
+    auto* col = new QVBoxLayout(page);
+    col->setContentsMargins(0, 10, 8, 0);
+    col->setSpacing(12);
+    auto* intro = ui::label(
+        WebSessions::available()
+            ? tr("Sign this participant in to LinkedIn and Indeed so SEEK can open postings and run job searches as them. "
+                 "Sign-in happens on the site's own page; SEEK never sees or stores the password. The sign-in stays in "
+                 "SEEK's browser for this profile only, on this computer — sign out when finished on a shared computer.")
+            : tr("This copy of SEEK was built without the built-in browser (Qt WebEngine), so it can't sign in to job "
+                 "sites. Rebuild with the Qt WebEngine component to turn this on."),
+        "Muted");
+    intro->setWordWrap(true);
+    col->addWidget(intro);
+    for (const WebSessions::Site& site : WebSessions::sites()) {
+        auto* card = new Card;
+        auto* row = new QHBoxLayout;
+        row->addWidget(ui::label(site.name, "CardTitle"));
+        auto* status = ui::badge(tr("Not signed in"));
+        m_siteStatus.insert(site.key, status);
+        row->addWidget(status);
+        row->addStretch(1);
+        auto* signIn = ui::button(tr("Sign in"), "box-arrow-up-right", true);
+        auto* check = ui::button(tr("Check"), "arrow-repeat");
+        check->setToolTip(tr("Ask %1 whether this profile is still signed in.").arg(site.name));
+        auto* signOut = ui::button(tr("Sign out"), "x-lg");
+        m_siteSignOut.insert(site.key, signOut);
+        for (QPushButton* b : {signIn, check, signOut}) {
+            b->setEnabled(WebSessions::available());
+            row->addWidget(b);
+        }
+        card->body()->addLayout(row);
+        col->addWidget(card);
+        const QString key = site.key;
+        connect(signIn, &QPushButton::clicked, this, [this, key] {
+            if (m_currentId.isEmpty()) return;
+            auto* dlg = new SiteSignInDialog(key, m_currentId, this);
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            connect(dlg, &SiteSignInDialog::finishedWith, this, [this, key](const QString& status) {
+                recordSiteStatus(key, status);
+            });
+            dlg->open();
+        });
+        connect(check, &QPushButton::clicked, this, [this, key, check] {
+            if (m_currentId.isEmpty()) return;
+            check->setEnabled(false);
+            m_siteStatus.value(key)->setText(tr("Checking…"));
+            WebSessions::instance()->check(m_currentId, key, this, [this, key, check, id = m_currentId](const QString& status) {
+                check->setEnabled(true);
+                if (id == m_currentId) recordSiteStatus(key, status);
+                else refreshSites();
+            });
+        });
+        connect(signOut, &QPushButton::clicked, this, [this, key] {
+            if (m_currentId.isEmpty()) return;
+            WebSessions::instance()->signOut(m_currentId, key);
+            recordSiteStatus(key, QStringLiteral("signed_out"));
+        });
+    }
+    col->addStretch(1);
+    return page;
+}
+
+void ProfilesPage::refreshSites() {
+    const QJsonObject accounts = m_profile.value("accounts").toObject();
+    for (const WebSessions::Site& site : WebSessions::sites()) {
+        const QJsonObject a = accounts.value(site.key).toObject();
+        const QString status = a.value("status").toString();
+        QLabel* badge = m_siteStatus.value(site.key);
+        const QDateTime when = QDateTime::fromString(a.value("checked_at").toString(), Qt::ISODate).toLocalTime();
+        const QString at = when.isValid() ? QLocale().toString(when.date(), QLocale::ShortFormat) : QString();
+        if (status == "signed_in") {
+            badge->setText(at.isEmpty() ? tr("Signed in") : tr("Signed in · checked %1").arg(at));
+            badge->setProperty("kind", "good");
+        } else if (status == "unknown") {
+            badge->setText(tr("Couldn't tell — try Check"));
+            badge->setProperty("kind", "warn");
+        } else {
+            badge->setText(tr("Not signed in"));
+            badge->setProperty("kind", QString());
+        }
+        ui::repolish(badge);
+        m_siteSignOut.value(site.key)->setEnabled(WebSessions::available() && status == "signed_in");
+    }
+}
+
+void ProfilesPage::recordSiteStatus(const QString& site, const QString& status) {
+    const QString id = m_currentId;
+    m_ctx->bridge()->call("profile.set_account", {{"profile_id", id}, {"site", site}, {"status", status}},
+                          [this, id, site, status](const QJsonValue& r, const BridgeError& e) {
+        if (e.isError()) return m_ctx->reportError(tr("Saving sign-in status"), e);
+        if (id != m_currentId) return;
+        m_profile.insert("accounts", r.toObject());  // sign-in status doesn't make the editor dirty
+        refreshSites();
+        const QString name = WebSessions::site(site).name;
+        if (status == "signed_in") m_ctx->toast(tr("Signed in to %1.").arg(name), AppContext::ToastKind::Success);
+        else if (status == "signed_out") m_ctx->toast(tr("Signed out of %1.").arg(name));
+        else m_ctx->toast(tr("%1 didn't say whether this profile is signed in. Try Check again.").arg(name),
+                          AppContext::ToastKind::Warning);
     }, this);
 }
 

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <QJsonArray>
 #include <QJsonObject>
 
 #include "ui/Widgets.h"
 
 class AppContext;
+class QCheckBox;
+class QTableWidget;
 class FlowLayout;
 class QComboBox;
 class QLineEdit;
@@ -25,6 +28,11 @@ private:
     void importInBrowser(const QString& url);
     void imported(const QJsonObject& job);
     void offerPaste();
+    void runSearch(int page);
+    void searchInBrowser(const QString& source, const QString& url, bool visible);
+    void addResults(const QJsonArray& rows);
+    void finishSearchStep();
+    void importResult(int row);
     void analyzePaste();
     void rebuildList();
     void showJob(const QString& id);
@@ -42,6 +50,25 @@ private:
     QLineEdit* m_pasteCompany;
     QLineEdit* m_pasteLocation;
     QPlainTextEdit* m_pasteText;
+
+    Card* m_searchCard;
+    QLineEdit* m_query;
+    QLineEdit* m_where;
+    QCheckBox* m_srcLinkedIn;
+    QCheckBox* m_srcIndeed;
+    QCheckBox* m_fairChance;
+    QPushButton* m_searchBtn;
+    QPushButton* m_more;
+    QPushButton* m_finishCheck;
+    QLabel* m_searchStatus;
+    QTableWidget* m_results;
+    QJsonArray m_resultRows;
+    QStringList m_searchNotes;
+    QString m_checkSource;
+    QString m_checkUrl;
+    QString m_importingId;
+    int m_page = 0;
+    int m_pending = 0;
 
     QListWidget* m_list;
     QStackedWidget* m_detailStack;
