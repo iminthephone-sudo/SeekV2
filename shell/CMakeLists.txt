@@ -45,8 +45,10 @@ else ()
     target_compile_options(SEEK PRIVATE -Wall -Wextra)
 endif ()
 
-# `cmake --install build --prefix dist` produces a runnable folder:
+# `cmake --install build --prefix dist` copies the app and the engine pack:
 #   dist/SEEK(.exe) + dist/python-backend/...
+# On Windows the Qt runtime (and Qt WebEngine's QtWebEngineProcess.exe, resources and locales) is added by
+# windeployqt, which scripts/build_windows.ps1 runs after the install — use that script for a runnable folder.
 install(TARGETS SEEK RUNTIME DESTINATION . BUNDLE DESTINATION .)
 install(DIRECTORY "${SEEK_BACKEND_SOURCE_DIR}/" DESTINATION python-backend
     PATTERN "__pycache__" EXCLUDE PATTERN ".pytest_cache" EXCLUDE PATTERN "tests" EXCLUDE PATTERN ".venv" EXCLUDE)

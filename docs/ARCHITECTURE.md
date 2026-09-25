@@ -64,9 +64,14 @@ Nothing is uploaded. The only network access is `job.fetch`, which downloads the
 When a site blocks that download (Indeed), the shell opens the same posting in its built-in browser
 (Qt WebEngine, `ui/BrowserImportDialog`) and hands the rendered page to `job.from_html`.
 Job search (`search.run`) downloads LinkedIn's public results feed; Indeed's results page loads in the built-in
-browser and comes back through `search.parse`. The built-in browser keeps one storage folder per SEEK profile
-(`core/WebSessions`), so a participant's LinkedIn/Indeed sign-in is used only for their profile; SEEK stores the
-sign-in status, never a password, and deleting a profile clears its browser cookies and cache.
+browser and comes back through `search.parse`. The built-in browser keeps separate storage per SEEK profile *and*
+per site (`core/WebSessions`: `seek-web-<profile>-linkedin`, `-indeed`, `-web`), so a participant's sign-in is used
+only for their profile, and "Sign out" wipes exactly that site's storage — including cookies saved in earlier
+sessions. SEEK stores the sign-in status, never a password. Deleting a profile clears its cookies and cache at once
+and removes its storage folders at the next start.
+
+Imports only reach the public internet: `job.fetch` refuses links (and redirect hops) into private networks,
+link-local addresses or this computer. `SEEK_ALLOW_LOCAL_FETCH=1` lifts that for development and tests.
 
 ## AI / NLP
 

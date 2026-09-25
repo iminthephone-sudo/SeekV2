@@ -125,8 +125,13 @@ QString SectionEditor::entryLabel(const QJsonObject& e) const {
 }
 
 void SectionEditor::setEntries(const QJsonArray& entries) {
+    // Keep the same entry selected across reloads (a save reply must not jump the form to entry 1).
+    const QString keep = currentEntry().value("id").toString();
     m_entries = entries;
-    rebuildList(entries.isEmpty() ? -1 : 0);
+    int select = entries.isEmpty() ? -1 : 0;
+    for (int i = 0; i < entries.size() && !keep.isEmpty(); ++i)
+        if (entries.at(i).toObject().value("id").toString() == keep) select = i;
+    rebuildList(select);
 }
 
 void SectionEditor::selectEntryById(const QString& id) {

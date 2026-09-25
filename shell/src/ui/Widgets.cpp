@@ -254,6 +254,7 @@ InfoBar::InfoBar(QWidget* parent) : QFrame(parent), m_icon(new QLabel(this)), m_
     lay->setSpacing(10);
     m_text->setWordWrap(true);
     m_text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_text->setTextFormat(Qt::PlainText);  // toasts carry job titles and other text from the internet
     auto* close = ui::flatButton("x-lg", tr("Dismiss"), this);
     connect(close, &QPushButton::clicked, this, &QWidget::hide);
     lay->addWidget(m_icon, 0, Qt::AlignTop);
@@ -333,6 +334,7 @@ QLabel* label(const QString& text, const char* objectName, QWidget* parent) {
 
 QLabel* chip(const QString& text, const QString& kind, const QString& tooltip) {
     auto* l = new QLabel(text);
+    l->setTextFormat(Qt::PlainText);  // keywords come from postings: never render them as HTML
     l->setObjectName("Chip");
     if (!kind.isEmpty()) l->setProperty("kind", kind);
     if (!tooltip.isEmpty()) l->setToolTip(tooltip);
@@ -341,6 +343,7 @@ QLabel* chip(const QString& text, const QString& kind, const QString& tooltip) {
 
 QLabel* badge(const QString& text, const QString& kind) {
     auto* l = new QLabel(text);
+    l->setTextFormat(Qt::PlainText);
     l->setObjectName("Badge");
     if (!kind.isEmpty()) l->setProperty("kind", kind);
     l->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);

@@ -34,6 +34,8 @@ public:
     static Options searchOptions(const QString& host);
 
     BrowserImportDialog(const QUrl& url, const QString& seekProfileId, const Options& options, QWidget* parent = nullptr);
+    ~BrowserImportDialog() override;
+    void done(int result) override;
 
 signals:
     // Emitted once, just before the dialog accepts.
@@ -49,6 +51,9 @@ private:
     QPushButton* m_import = nullptr;
     QTimer* m_poll = nullptr;
     bool m_captured = false;
+    // Set when the dialog is closing: runJavaScript callbacks still fire (with an invalid value) while the
+    // page is torn down, and must do nothing then.
+    bool m_closing = false;
 };
 
 class SiteSignInDialog : public QDialog {
@@ -68,6 +73,7 @@ private:
     QWebEngineView* m_view = nullptr;
     QLabel* m_status = nullptr;
     bool m_done = false;
+    bool m_checking = false;
 };
 
 class PageGrabber : public QObject {
@@ -75,6 +81,7 @@ class PageGrabber : public QObject {
 public:
     // Starts loading immediately; deletes itself after emitting captured() or failed().
     PageGrabber(const QUrl& url, const QString& seekProfileId, const QString& detectJs, int timeoutMs, QObject* parent);
+    ~PageGrabber() override;
 
 signals:
     void captured(const QString& html, const QUrl& url);

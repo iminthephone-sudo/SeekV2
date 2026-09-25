@@ -5,7 +5,9 @@
 #include <QScreen>
 #include <QClipboard>
 #include <QComboBox>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QMenu>
@@ -49,6 +51,8 @@ QString lastDir() {
 }  // namespace
 
 bool ResumePage::writePdf(const QString& path, const QString& content, bool plainText) {
+    QFile::remove(path);  // so a stale file can't pass for a successful write
+    {
     QPdfWriter writer(path);
     writer.setPageSize(QPageSize(QPageSize::Letter));
     writer.setPageMargins(QMarginsF(16, 14, 16, 14), QPageLayout::Millimeter);
@@ -72,7 +76,9 @@ bool ResumePage::writePdf(const QString& path, const QString& content, bool plai
     const qreal screenDpi = QGuiApplication::primaryScreen() ? QGuiApplication::primaryScreen()->logicalDotsPerInch() : 96.0;
     doc.setPageSize(writer.pageLayout().paintRect(QPageLayout::Inch).size() * screenDpi);
     doc.print(&writer);
-    return true;
+    }  // the writer flushes and closes the file here
+    // QPdfWriter reports no errors; an unwritable folder just leaves no file.
+    return QFileInfo(path).size() > 0;
 }
 
 ResumePage::ResumePage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(ctx) {
@@ -325,9 +331,16 @@ void ResumePage::exportAs(const QString& format) {
     if (path.isEmpty()) return;
     QSettings().setValue("ui/lastExportDir", QFileInfo(path).absolutePath());
     if (format == "pdf") {
-        // The shell prints the exact HTML shown in the preview.
-        writePdf(path, m_html);
-        m_ctx->toast(tr("Saved %1").arg(QDir::toNativeSeparators(path)), AppContext::ToastKind::Success);
+        // Render for this profile and template now: the preview may still show the previous one.
+        m_ctx->bridge()->call("resume.render",
+                              {{"profile_id", id}, {"format", "html"}, {"template", m_template->currentData().toString()}},
+                              [this, path](const QJsonValue& r, const BridgeError& e) {
+            if (e.isError()) return m_ctx->reportError(tr("Export"), e);
+            if (!writePdf(path, r.toObject().value("content").toString()))
+                return m_ctx->toast(tr("Couldn't write %1 — check the folder and that the file isn't open.")
+                                        .arg(QDir::toNativeSeparators(path)), AppContext::ToastKind::Error);
+            m_ctx->toast(tr("Saved %1").arg(QDir::toNativeSeparators(path)), AppContext::ToastKind::Success);
+        }, this);
         return;
     }
     m_ctx->bridge()->call("resume.export",

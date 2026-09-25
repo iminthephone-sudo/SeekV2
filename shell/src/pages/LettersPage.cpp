@@ -132,14 +132,14 @@ LettersPage::LettersPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx
     split->setStretchFactor(1, 1);
 
     connect(gen, &QPushButton::clicked, this, &LettersPage::generate);
-    connect(m_save, &QPushButton::clicked, this, &LettersPage::saveLetter);
+    connect(m_save, &QPushButton::clicked, this, [this] { saveLetter(); });
     connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { setDirty(true); });
     connect(copy, &QPushButton::clicked, this, [this] {
         QApplication::clipboard()->setText(m_editor->toPlainText());
         m_ctx->toast(tr("Letter copied."), AppContext::ToastKind::Success);
     });
-    connect(newBtn, &QPushButton::clicked, this, [this] {
-        if (!confirmDiscard()) return;
+    connect(newBtn, &QPushButton::clicked, this, [this] { resolveUnsaved([this] {
+        ++m_session;
         m_loading = true;
         m_letterId.clear();
         m_editor->clear();
@@ -147,7 +147,7 @@ LettersPage::LettersPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx
         m_list->clearSelection();
         m_loading = false;
         setDirty(false);
-    });
+    }); });
     connect(del, &QPushButton::clicked, this, [this] {
         if (m_letterId.isEmpty()) return;
         if (QMessageBox::question(this, tr("Delete letter"), tr("Delete this letter?")) != QMessageBox::Yes) return;
@@ -166,8 +166,7 @@ LettersPage::LettersPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx
         if (!item) return;
         const QString id = item->data(Qt::UserRole).toString();
         if (id.isEmpty() || id == m_letterId) return;
-        if (!confirmDiscard()) return;
-        openLetter(id);
+        resolveUnsaved([this, id] { openLetter(id); });
     });
     connect(ctx, &AppContext::profilesChanged, this, [this] { m_ctx->fillProfileCombo(m_profile); });
     connect(ctx, &AppContext::jobsChanged, this, [this] { m_ctx->fillJobCombo(m_job, {}, true); });
@@ -183,7 +182,18 @@ void LettersPage::activate(const QVariantMap& args) {
     refreshList();
 }
 
-bool LettersPage::canClose() { return confirmDiscard(); }
+bool LettersPage::canClose() {
+    if (!m_dirty) return true;
+    const auto answer = QMessageBox::question(this, tr("Unsaved letter"), tr("Save the current letter first?"),
+                                              QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    if (answer == QMessageBox::Discard) {
+        revert();
+        return true;
+    }
+    // Save: keep the window open until the engine confirms, then close again (nothing is dirty by then).
+    if (answer == QMessageBox::Save) saveLetter([this] { window()->close(); });
+    return false;
+}
 
 void LettersPage::setDirty(bool dirty) {
     if (m_loading) return;
@@ -191,14 +201,28 @@ void LettersPage::setDirty(bool dirty) {
     m_save->setEnabled(m_dirty);
 }
 
-bool LettersPage::confirmDiscard() {
-    if (!m_dirty) return true;
+void LettersPage::resolveUnsaved(std::function<void()> next) {
+    if (!m_dirty) return next();
     const auto answer = QMessageBox::question(this, tr("Unsaved letter"), tr("Save the current letter first?"),
                                               QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-    if (answer == QMessageBox::Cancel) return false;
-    if (answer == QMessageBox::Save) saveLetter();
+    if (answer == QMessageBox::Save) return saveLetter(std::move(next));
+    if (answer == QMessageBox::Discard) {
+        revert();
+        next();
+    }
+}
+
+void LettersPage::revert() {
+    if (m_letterId.isEmpty()) {
+        m_loading = true;
+        m_editor->clear();
+        m_meta->setText(tr("New letter — not saved yet"));
+        m_loading = false;
+    } else {
+        openLetter(m_letterId);
+    }
     m_dirty = false;
-    return true;
+    m_save->setEnabled(false);
 }
 
 void LettersPage::generate() {
@@ -207,7 +231,12 @@ void LettersPage::generate() {
         m_ctx->toast(tr("Create a profile first."), AppContext::ToastKind::Warning);
         return;
     }
-    if (!confirmDiscard()) return;
+    resolveUnsaved([this] { runGenerate(); });
+}
+
+void LettersPage::runGenerate() {
+    const QString pid = m_profile->currentData().toString();
+    if (pid.isEmpty()) return;
     QJsonObject params{{"profile_id", pid},
                        {"job_id", m_job->currentData().toString()},
                        {"tone", m_tone->currentData().toString()},
@@ -220,6 +249,7 @@ void LettersPage::generate() {
         if (e.isError()) return m_ctx->reportError(tr("Writing letter"), e);
         const QJsonObject out = r.toObject();
         m_loading = true;
+        ++m_session;
         m_letterId = out.value("letter").toObject().value("id").toString();
         m_editor->setPlainText(out.value("text").toString());
         QString meta = tr("%1 words · %2 examples from experience").arg(out.value("word_count").toInt()).arg(out.value("evidence_count").toInt());
@@ -233,26 +263,29 @@ void LettersPage::generate() {
     }, this);
 }
 
-void LettersPage::saveLetter() {
+void LettersPage::saveLetter(std::function<void()> then) {
     const QString text = m_editor->toPlainText();
+    QJsonObject params{{"letter_id", m_letterId}, {"text", text}};
     if (m_letterId.isEmpty()) {
-        // A hand-written letter: create a record by generating, then overwrite with the text.
+        // A hand-written letter: the engine creates it with this text in the same call.
         const QString pid = m_profile->currentData().toString();
-        if (pid.isEmpty()) return;
-        m_ctx->bridge()->call("letter.generate", {{"profile_id", pid}, {"job_id", m_job->currentData().toString()}},
-                              [this, text](const QJsonValue& r, const BridgeError& e) {
-            if (e.isError()) return m_ctx->reportError(tr("Saving letter"), e);
-            m_letterId = r.toObject().value("letter").toObject().value("id").toString();
-            saveLetter();
-        }, this);
-        return;
+        if (pid.isEmpty()) return m_ctx->toast(tr("Pick a profile for this letter first."), AppContext::ToastKind::Warning);
+        params.insert("profile_id", pid);
+        params.insert("job_id", m_job->currentData().toString());
     }
-    m_ctx->bridge()->call("letter.save", {{"letter_id", m_letterId}, {"text", text}}, [this](const QJsonValue&, const BridgeError& e) {
+    const int session = m_session;
+    m_ctx->bridge()->call("letter.save", params, [this, text, session, then](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Saving letter"), e);
-        m_dirty = false;
-        m_save->setEnabled(false);
+        if (session == m_session) {  // still the same letter on screen
+            if (m_letterId.isEmpty()) m_letterId = r.toObject().value("id").toString();
+            if (m_editor->toPlainText() == text) {  // nothing typed since the save was sent
+                m_dirty = false;
+                m_save->setEnabled(false);
+            }
+        }
         m_ctx->toast(tr("Letter saved."), AppContext::ToastKind::Success);
         refreshList();
+        if (then) then();
     }, this);
 }
 
@@ -282,6 +315,7 @@ void LettersPage::openLetter(const QString& id) {
     m_ctx->bridge()->call("letter.get", {{"letter_id", id}}, [this](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Opening letter"), e);
         const QJsonObject l = r.toObject();
+        ++m_session;
         m_loading = true;
         m_letterId = l.value("id").toString();
         m_editor->setPlainText(l.value("text").toString());
@@ -305,7 +339,9 @@ void LettersPage::exportAs(const QString& format) {
     if (path.isEmpty()) return;
     QSettings().setValue("ui/lastExportDir", QFileInfo(path).absolutePath());
     if (format == "pdf") {
-        ResumePage::writePdf(path, text, true);
+        if (!ResumePage::writePdf(path, text, true))
+            return m_ctx->toast(tr("Couldn't write %1 — check the folder and that the file isn't open.")
+                                    .arg(QDir::toNativeSeparators(path)), AppContext::ToastKind::Error);
         m_ctx->toast(tr("Saved %1").arg(QDir::toNativeSeparators(path)), AppContext::ToastKind::Success);
         return;
     }

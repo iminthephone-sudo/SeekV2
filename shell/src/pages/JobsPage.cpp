@@ -206,6 +206,8 @@ JobsPage::JobsPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(ctx) 
     auto* titles = new QVBoxLayout;
     m_title = ui::label(QString(), "SectionTitle");
     m_meta = ui::label(QString(), "Muted");
+    m_title->setTextFormat(Qt::PlainText);  // titles and companies come from the internet
+    m_meta->setTextFormat(Qt::PlainText);
     titles->addWidget(m_title);
     titles->addWidget(m_meta);
     head->addLayout(titles, 1);
@@ -263,14 +265,11 @@ JobsPage::JobsPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(ctx) 
         if (!m_job.isEmpty() && m_status->currentData().toString() != m_job.value("status").toString())
             updateJob({{"status", m_status->currentData().toString()}});
     });
-    auto* notesTimer = new QTimer(this);
-    notesTimer->setSingleShot(true);
-    notesTimer->setInterval(800);
-    connect(m_notes, &QPlainTextEdit::textChanged, notesTimer, qOverload<>(&QTimer::start));
-    connect(notesTimer, &QTimer::timeout, this, [this] {
-        if (!m_job.isEmpty() && m_notes->toPlainText() != m_job.value("notes").toString())
-            updateJob({{"notes", m_notes->toPlainText()}});
-    });
+    m_notesTimer = new QTimer(this);
+    m_notesTimer->setSingleShot(true);
+    m_notesTimer->setInterval(800);
+    connect(m_notes, &QPlainTextEdit::textChanged, m_notesTimer, qOverload<>(&QTimer::start));
+    connect(m_notesTimer, &QTimer::timeout, this, &JobsPage::flushNotes);
     connect(optimize, &QPushButton::clicked, this, [this] {
         m_ctx->navigate("optimize", {{"job_id", m_job.value("id").toString()}, {"run", true}});
     });
@@ -280,9 +279,12 @@ JobsPage::JobsPage(AppContext* ctx, QWidget* parent) : Page(parent), m_ctx(ctx) 
     connect(m_openLink, &QPushButton::clicked, this, [this] { QDesktopServices::openUrl(QUrl(m_job.value("url").toString())); });
     connect(del, &QPushButton::clicked, this, [this] {
         if (m_job.isEmpty()) return;
-        if (QMessageBox::question(this, tr("Delete posting"), tr("Delete “%1”?").arg(m_job.value("title").toString())) != QMessageBox::Yes)
+        // Capture the posting now: the list can change while the question is open.
+        const QString id = m_job.value("id").toString();
+        const QString question = tr("Delete “%1”?").arg(m_job.value("title").toString());
+        if (QMessageBox::question(this, tr("Delete posting"), Qt::convertFromPlainText(question)) != QMessageBox::Yes)
             return;
-        m_ctx->bridge()->call("job.delete", {{"job_id", m_job.value("id").toString()}}, [this](const QJsonValue&, const BridgeError& e) {
+        m_ctx->bridge()->call("job.delete", {{"job_id", id}}, [this](const QJsonValue&, const BridgeError& e) {
             if (e.isError()) return m_ctx->reportError(tr("Deleting posting"), e);
             m_job = {};
             m_detailStack->setCurrentIndex(0);
@@ -305,7 +307,22 @@ void JobsPage::activate(const QVariantMap& args) {
     if (!id.isEmpty()) showJob(id);
 }
 
+void JobsPage::flushNotes() {
+    // Save notes for the posting they were typed on, even if another one is showing by now.
+    m_notesTimer->stop();
+    const QString id = m_notesJobId;
+    if (id.isEmpty() || m_notes->toPlainText() == m_notesSaved) return;
+    const QString text = m_notes->toPlainText();
+    m_notesSaved = text;
+    m_ctx->bridge()->call("job.update", {{"job_id", id}, {"changes", QJsonObject{{"notes", text}}}},
+                          [this, id](const QJsonValue& r, const BridgeError& e) {
+        if (e.isError()) return m_ctx->reportError(tr("Saving notes"), e);
+        if (m_job.value("id").toString() == id) m_job = r.toObject();
+    }, this);
+}
+
 void JobsPage::fetch() {
+    if (!m_fetchRequest.isEmpty()) return;  // one import at a time (Enter, double-click and the button all land here)
     const QString url = m_url->text().trimmed();
     if (url.isEmpty()) {
         m_url->setFocus();
@@ -322,6 +339,7 @@ void JobsPage::fetch() {
         m_progressText->hide();
         m_fetchRequest.clear();
         if (e.isError()) {
+            if (e.code != "fetch_blocked") m_importingId.clear();  // the browser import keeps it for the ✓
             // The site turned away SEEK's downloader (Indeed does); a real browser gets through.
             if (e.code == "fetch_blocked" && WebSessions::available()) return importInBrowser(url);
             m_ctx->toast(e.message, AppContext::ToastKind::Warning);
@@ -341,11 +359,12 @@ void JobsPage::importInBrowser(const QString& url) {
             const QJsonObject params{{"html", html}, {"url", pageUrl.toString()}};
             m_ctx->bridge()->call("job.from_html", params, [this](const QJsonValue& job, const BridgeError& err) {
                 if (!err.isError()) return imported(job.toObject());
+                m_importingId.clear();
                 m_ctx->toast(err.message, AppContext::ToastKind::Warning);
                 offerPaste();
             }, this);
         });
-        connect(dlg, &QDialog::rejected, this, &JobsPage::offerPaste);
+        connect(dlg, &QDialog::rejected, this, &JobsPage::offerPaste);  // offerPaste clears m_importingId
         dlg->open();
     }, this);
 }
@@ -394,6 +413,7 @@ void JobsPage::runSearch(int page) {
     }
     m_page = page;
     m_searchNotes.clear();
+    m_importingId.clear();
     m_finishCheck->hide();
     m_searchBtn->setEnabled(false);
     m_more->setEnabled(false);
@@ -433,6 +453,7 @@ void JobsPage::searchInBrowser(const QString& source, const QString& url, bool v
     }
     if (visible) {
         ++m_pending;
+        m_searchNotes.clear();  // "click Finish …'s check" is being done now
         auto* dlg = new BrowserImportDialog(QUrl(url), m_ctx->activeProfileId(), BrowserImportDialog::searchOptions(name), this);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         connect(dlg, &BrowserImportDialog::pageCaptured, this, [parse](const QString& html, const QUrl&) { parse(html); });
@@ -444,13 +465,15 @@ void JobsPage::searchInBrowser(const QString& source, const QString& url, bool v
     auto* grabber = new PageGrabber(QUrl(url), m_ctx->activeProfileId(), BrowserImportDialog::searchOptions(name).detectJs,
                                     30000, this);
     connect(grabber, &PageGrabber::captured, this, [parse](const QString& html, const QUrl&) { parse(html); });
-    connect(grabber, &PageGrabber::failed, this, [this, source, url, name](const QString&) {
-        // A "verify you are human" check needs a person: offer to open it.
+    connect(grabber, &PageGrabber::failed, this, [this, source, url, name](const QString& reason) {
+        // Either way a person can finish it in a visible window.
         m_checkSource = source;
         m_checkUrl = url;
-        m_finishCheck->setText(tr("Finish %1's check").arg(name));
+        m_finishCheck->setText(reason == "challenge" ? tr("Finish %1's check").arg(name) : tr("Open %1 results").arg(name));
         m_finishCheck->show();
-        m_searchNotes << tr("%1 wants to confirm a person is searching — click “Finish %1's check”.").arg(name);
+        m_searchNotes << (reason == "challenge"
+                              ? tr("%1 wants to confirm a person is searching — click “Finish %1's check”.").arg(name)
+                              : tr("%1 didn't answer in time — click “Open %1 results” to try in a window.").arg(name));
         finishSearchStep();
     });
 }
@@ -471,8 +494,10 @@ void JobsPage::addResults(const QJsonArray& rows) {
                                    r.value("source").toString() == "indeed" ? QStringLiteral("Indeed") : QStringLiteral("LinkedIn")};
         for (int c = 0; c < cells.size(); ++c) {
             auto* item = new QTableWidgetItem(cells.at(c));
-            if (c == 0) item->setToolTip(r.value("snippet").toString().isEmpty() ? r.value("url").toString()
-                                                                                 : r.value("snippet").toString());
+            // Wrapped as escaped HTML so a posting's own markup can't render in the tooltip.
+            if (c == 0) item->setToolTip("<p>" + (r.value("snippet").toString().isEmpty() ? r.value("url").toString()
+                                                                                        : r.value("snippet").toString())
+                                                     .toHtmlEscaped() + "</p>");
             m_results->setItem(i, c, item);
         }
     }
@@ -501,7 +526,7 @@ void JobsPage::importResult(int row) {
 
 void JobsPage::analyzePaste() {
     const QString text = m_pasteText->toPlainText().trimmed();
-    if (text.split(QRegularExpression("\\s+")).size() < 25) {
+    if (text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).size() < 25) {
         m_ctx->toast(tr("Paste the whole description (at least a few sentences) so keywords can be found."),
                      AppContext::ToastKind::Warning);
         return;
@@ -555,7 +580,10 @@ void JobsPage::showJob(const QString& id) {
 }
 
 void JobsPage::populate(const QJsonObject& job) {
+    if (m_notesTimer->isActive()) flushNotes();  // notes typed on the previous posting are saved to it
     m_job = job;
+    m_notesJobId = job.value("id").toString();
+    m_notesSaved = job.value("notes").toString();
     m_detailStack->setCurrentIndex(1);
     m_title->setText(job.value("title").toString());
     QStringList meta;
@@ -605,12 +633,13 @@ void JobsPage::populate(const QJsonObject& job) {
 
 void JobsPage::updateJob(const QJsonObject& changes) {
     const QString id = m_job.value("id").toString();
-    m_ctx->bridge()->call("job.update", {{"job_id", id}, {"changes", changes}}, [this, changes](const QJsonValue& r, const BridgeError& e) {
+    m_ctx->bridge()->call("job.update", {{"job_id", id}, {"changes", changes}}, [this, changes, id](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Updating posting"), e);
-        m_job = r.toObject();
+        if (m_job.value("id").toString() == id) m_job = r.toObject();  // another posting may be showing by now
         if (changes.contains("status")) {
             m_ctx->refreshJobs();
-            m_ctx->toast(tr("Status: %1").arg(statusLabel(m_job.value("status").toString())), AppContext::ToastKind::Success);
+            m_ctx->toast(tr("Status: %1").arg(statusLabel(r.toObject().value("status").toString())),
+                         AppContext::ToastKind::Success);
         }
     }, this);
 }

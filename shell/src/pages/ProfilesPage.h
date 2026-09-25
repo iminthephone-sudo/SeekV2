@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <functional>
 
 #include "ui/Widgets.h"
 
@@ -27,7 +28,10 @@ private:
     void populate(const QJsonObject& profile);
     QJsonObject collect() const;
     void save(std::function<void()> then = {});
-    bool confirmDiscard();
+    // Unsaved edits? Ask; Save runs ``next`` only after the save succeeded, Discard reverts first, Cancel skips.
+    void resolveUnsaved(std::function<void()> next);
+    void showNewProfileDialog();
+    void showDuplicateDialog();
     void setDirty(bool dirty);
     void newProfile();
     void duplicateProfile();
@@ -65,4 +69,5 @@ private:
     QString m_currentId;
     bool m_dirty = false;
     bool m_loading = false;
+    int m_editSerial = 0;  // bumped on every edit; a save reply only repopulates if nothing changed since
 };

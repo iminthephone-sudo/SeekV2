@@ -155,6 +155,7 @@ RecordCoachTab::RecordCoachTab(AppContext* ctx, std::function<QString()> profile
 }
 
 void RecordCoachTab::loadBank() {
+    if (!m_questions.isEmpty()) return;  // loaded already (the engine may have restarted; keep the answer)
     m_ctx->bridge()->call("interview.record_questions", [this](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Loading record questions"), e);
         const QJsonObject bank = r.toObject();

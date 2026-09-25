@@ -11,6 +11,7 @@ class AppContext;
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
+class QPushButton;
 class QVBoxLayout;
 
 class SummaryHelpDialog : public QDialog {
@@ -60,4 +61,5 @@ private:
     QVBoxLayout* m_suggested;
     QList<Row> m_rows;
     QList<Row> m_suggestions;
+    QPushButton* m_apply = nullptr;
 };

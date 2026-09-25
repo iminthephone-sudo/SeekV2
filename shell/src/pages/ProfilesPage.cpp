@@ -17,6 +17,7 @@
 #include <QShortcut>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -229,6 +230,7 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
             tools->addStretch(1);
             connect(help, &QPushButton::clicked, this, [this, ed, titleField] {
                 const QJsonObject entry = ed->currentEntry();
+                const QString entryId = entry.value("id").toString();
                 if (entry.isEmpty()) return m_ctx->toast(tr("Add or select an entry first."));
                 QStringList bullets;
                 for (const QJsonValue& b : entry.value("bullets").toArray()) bullets << b.toString();
@@ -236,7 +238,12 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
                 const bool current = end.isEmpty() || end == "present" || end == "current" || end == "now";
                 auto* dlg = new DutiesHelpDialog(m_ctx, entry.value(titleField).toString(), bullets, current, this);
                 dlg->setAttribute(Qt::WA_DeleteOnClose);
-                connect(dlg, &DutiesHelpDialog::applied, this, [ed](const QStringList& lines) {
+                connect(dlg, &DutiesHelpDialog::applied, this, [this, ed, entryId](const QStringList& lines) {
+                    // Apply to the entry the dialog was opened for, even if the list moved meanwhile.
+                    ed->selectEntryById(entryId);
+                    if (ed->currentEntry().value("id").toString() != entryId)
+                        return m_ctx->toast(tr("That entry is no longer here, so nothing was changed."),
+                                            AppContext::ToastKind::Warning);
                     ed->setCurrentField("bullets", QJsonArray::fromStringList(lines));
                 });
                 dlg->open();
@@ -305,11 +312,10 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
         if (!item) return;
         const QString id = item->data(0, Qt::UserRole).toString();
         if (id.isEmpty() || id == m_currentId) return;
-        if (!confirmDiscard()) {
-            rebuildTree();  // re-select the current profile
-            return;
-        }
-        loadProfile(id);
+        // Keep the open profile highlighted until it's replaced (and when the question is cancelled). Deferred:
+        // rebuilding the tree inside its own currentItemChanged would leave the clicked row selected.
+        QTimer::singleShot(0, this, &ProfilesPage::rebuildTree);
+        resolveUnsaved([this, id] { loadProfile(id); });
     });
     connect(ctx, &AppContext::profilesChanged, this, &ProfilesPage::rebuildTree);
     connect(Theme::instance(), &Theme::changed, this, &ProfilesPage::rebuildTree);  // re-tint list icons
@@ -324,12 +330,28 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
 
 void ProfilesPage::activate(const QVariantMap& args) {
     const QString id = args.value("profile_id").toString();
-    if (!id.isEmpty() && id != m_currentId && confirmDiscard()) loadProfile(id);
+    if (!id.isEmpty() && id != m_currentId) resolveUnsaved([this, id] { loadProfile(id); });
+    // Reload the open profile when coming back: the Optimizer (or another page) may have changed it, and a save
+    // from a stale editor would silently undo that.
+    else if (!m_currentId.isEmpty() && !m_dirty) loadProfile(m_currentId);
     else if (m_currentId.isEmpty() && !m_ctx->activeProfileId().isEmpty()) loadProfile(m_ctx->activeProfileId());
     if (args.value("new").toBool()) newProfile();
 }
 
-bool ProfilesPage::canClose() { return confirmDiscard(); }
+bool ProfilesPage::canClose() {
+    if (!m_dirty) return true;
+    const auto answer = QMessageBox::question(
+        this, tr("Unsaved changes"), tr("Save changes to “%1” first?").arg(m_fields.value("name")->text()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Discard) {
+        setDirty(false);
+        loadProfile(m_currentId);  // put the saved version back on screen
+        return true;
+    }
+    // Save: keep the window open until the engine confirms, then close again (nothing is dirty by then).
+    if (answer == QMessageBox::Save) save([this] { window()->close(); });
+    return false;
+}
 
 void ProfilesPage::rebuildTree() {
     const QString filter = m_search->text().trimmed();
@@ -434,40 +456,52 @@ QJsonObject ProfilesPage::collect() const {
 void ProfilesPage::save(std::function<void()> then) {
     if (m_currentId.isEmpty()) return;
     m_save->setEnabled(false);
-    m_ctx->bridge()->call("profile.update", {{"profile_id", m_currentId}, {"changes", collect()}},
-                          [this, then](const QJsonValue& r, const BridgeError& e) {
+    const int serial = m_editSerial;
+    const QString id = m_currentId;
+    m_ctx->bridge()->call("profile.update", {{"profile_id", id}, {"changes", collect()}},
+                          [this, then, serial, id](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) {
             setDirty(true);
             return m_ctx->reportError(tr("Saving profile"), e);
         }
-        populate(r.toObject());
+        if (id == m_currentId && serial == m_editSerial) {
+            populate(r.toObject());
+        } else if (id == m_currentId) {
+            // Typed more while the save was queued: keep the editor (and its dirty state), refresh the rest.
+            m_profile = r.toObject();
+            m_save->setEnabled(true);
+        }
         m_ctx->refreshProfiles();
         m_ctx->toast(tr("Profile saved."), AppContext::ToastKind::Success);
         if (then) then();
     }, this);
 }
 
-bool ProfilesPage::confirmDiscard() {
-    if (!m_dirty) return true;
+void ProfilesPage::resolveUnsaved(std::function<void()> next) {
+    if (!m_dirty) return next();
     const auto answer = QMessageBox::question(
         this, tr("Unsaved changes"), tr("Save changes to “%1” first?").arg(m_fields.value("name")->text()),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
-    if (answer == QMessageBox::Cancel) return false;
-    if (answer == QMessageBox::Save) save();
-    setDirty(false);
-    return true;
+    if (answer == QMessageBox::Save) return save(std::move(next));  // a failed save keeps the edits and stops here
+    if (answer == QMessageBox::Discard) {
+        setDirty(false);
+        loadProfile(m_currentId);  // the discarded edits never linger on screen
+        next();
+    }
 }
 
 void ProfilesPage::setDirty(bool dirty) {
     if (m_loading) return;
     m_dirty = dirty;
+    if (dirty) ++m_editSerial;
     m_save->setEnabled(dirty);
     m_revert->setEnabled(dirty);
     setProperty("dirty", dirty);
 }
 
-void ProfilesPage::newProfile() {
-    if (!confirmDiscard()) return;
+void ProfilesPage::newProfile() { resolveUnsaved([this] { showNewProfileDialog(); }); }
+
+void ProfilesPage::showNewProfileDialog() {
     QDialog dlg(this);
     dlg.setWindowTitle(tr("New profile"));
     auto* form = new QFormLayout(&dlg);
@@ -497,7 +531,11 @@ void ProfilesPage::newProfile() {
 }
 
 void ProfilesPage::duplicateProfile() {
-    if (m_currentId.isEmpty() || !confirmDiscard()) return;
+    if (m_currentId.isEmpty()) return;
+    resolveUnsaved([this] { showDuplicateDialog(); });
+}
+
+void ProfilesPage::showDuplicateDialog() {
     bool ok = false;
     const QString name = QInputDialog::getText(this, tr("Duplicate profile"), tr("Name for the copy:"), QLineEdit::Normal,
                                                m_fields.value("name")->text() + tr(" (copy)"), &ok);
@@ -521,6 +559,12 @@ void ProfilesPage::deleteProfile() {
         WebSessions::instance()->forget(id);  // the participant's LinkedIn/Indeed sign-ins go with the profile
         m_currentId.clear();
         m_loading = true;
+        // Don't leave the deleted participant's details on screen (disabled, but readable).
+        for (QLineEdit* e : std::as_const(m_fields)) e->clear();
+        for (QPlainTextEdit* e : {m_summary, m_notes, m_skills}) e->clear();
+        for (SectionEditor* s : std::as_const(m_sections)) s->setEntries({});
+        m_profile = {};
+        refreshSites();
         m_editorTitle->setText(tr("Select or create a profile"));
         m_editor->setEnabled(false);
         m_loading = false;
@@ -614,7 +658,8 @@ void ProfilesPage::refreshSites() {
             badge->setProperty("kind", QString());
         }
         ui::repolish(badge);
-        m_siteSignOut.value(site.key)->setEnabled(WebSessions::available() && status == "signed_in");
+        // Always available: a sign-in can exist even when SEEK never recorded it (e.g. the dialog was cancelled).
+        m_siteSignOut.value(site.key)->setEnabled(WebSessions::available() && !m_currentId.isEmpty());
     }
 }
 

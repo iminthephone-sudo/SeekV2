@@ -64,7 +64,7 @@ BrowserImportDialog::BrowserImportDialog(const QUrl& url, const QString& seekPro
     col->addWidget(intro);
 
     m_view = new QWebEngineView;
-    m_view->setPage(new QWebEnginePage(WebSessions::instance()->profile(seekProfileId), m_view));
+    m_view->setPage(new QWebEnginePage(WebSessions::instance()->profileForUrl(seekProfileId, url), m_view));
     col->addWidget(m_view, 1);
 
     auto* row = new QHBoxLayout;
@@ -93,22 +93,32 @@ BrowserImportDialog::BrowserImportDialog(const QUrl& url, const QString& seekPro
     m_view->load(url);
 }
 
+BrowserImportDialog::~BrowserImportDialog() { m_closing = true; }
+
+void BrowserImportDialog::done(int result) {
+    m_closing = true;
+    m_poll->stop();
+    QDialog::done(result);
+}
+
 void BrowserImportDialog::checkPage() {
-    if (m_captured) return;
+    if (m_captured || m_closing) return;
     m_view->page()->runJavaScript(m_options.detectJs, [this](const QVariant& found) {
-        if (found.toBool()) capture();
+        if (!m_closing && found.toBool()) capture();
     });
 }
 
 void BrowserImportDialog::capture() {
-    if (m_captured) return;
+    if (m_captured || m_closing) return;
     m_captured = true;
     m_poll->stop();
     m_import->setEnabled(false);
     m_status->setText(tr("Reading the page…"));
+    const QUrl url = m_view->url();
     // outerHTML rather than the downloaded source: it includes what the page's scripts rendered.
-    m_view->page()->runJavaScript(QStringLiteral("document.documentElement.outerHTML"), [this](const QVariant& html) {
-        emit pageCaptured(html.toString(), m_view->url());
+    m_view->page()->runJavaScript(QStringLiteral("document.documentElement.outerHTML"), [this, url](const QVariant& html) {
+        if (m_closing || !html.isValid()) return;  // cancelled, or the page is being destroyed
+        emit pageCaptured(html.toString(), url);
         accept();
     });
 }
@@ -128,7 +138,7 @@ SiteSignInDialog::SiteSignInDialog(const QString& siteKey, const QString& seekPr
     intro->setWordWrap(true);
     col->addWidget(intro);
     m_view = new QWebEngineView;
-    m_view->setPage(new QWebEnginePage(WebSessions::instance()->profile(seekProfileId), m_view));
+    m_view->setPage(new QWebEnginePage(WebSessions::instance()->profile(seekProfileId, siteKey), m_view));
     col->addWidget(m_view, 1);
     auto* row = new QHBoxLayout;
     m_status = ui::label(tr("Waiting for sign-in…"), "Muted");
@@ -139,12 +149,17 @@ SiteSignInDialog::SiteSignInDialog(const QString& siteKey, const QString& seekPr
     row->addWidget(doneBtn);
     col->addLayout(row);
 
-    // Leaving the sign-in pages for the site itself means the sign-in went through.
+    // Leaving the sign-in pages looks like success, but clicking the site's logo does too: confirm with the
+    // site (a page that needs a sign-in) before anything is recorded.
     connect(m_view, &QWebEngineView::urlChanged, this, [this](const QUrl& u) {
-        if (!m_done && WebSessions::statusFromUrl(m_site, u) == "signed_in") {
-            m_status->setText(tr("Signed in — finishing…"));
-            QTimer::singleShot(1500, this, [this] { finish(QStringLiteral("signed_in")); });
-        }
+        if (m_done || m_checking || WebSessions::statusFromUrl(m_site, u) != "signed_in") return;
+        m_checking = true;
+        m_status->setText(tr("Checking the sign-in…"));
+        WebSessions::instance()->check(m_profileId, m_site, this, [this](const QString& status) {
+            m_checking = false;
+            if (status == "signed_in") return finish(status);
+            m_status->setText(tr("Not signed in yet — finish signing in, then click “I'm signed in”."));
+        });
     });
     connect(doneBtn, &QPushButton::clicked, this, [this, doneBtn] {
         doneBtn->setEnabled(false);
@@ -166,7 +181,7 @@ void SiteSignInDialog::finish(const QString& status) {
 PageGrabber::PageGrabber(const QUrl& url, const QString& seekProfileId, const QString& detectJs, int timeoutMs,
                          QObject* parent)
     : QObject(parent), m_detectJs(detectJs) {
-    m_page = new QWebEnginePage(WebSessions::instance()->profile(seekProfileId), this);
+    m_page = new QWebEnginePage(WebSessions::instance()->profileForUrl(seekProfileId, url), this);
     m_poll = new QTimer(this);
     m_poll->setInterval(1000);
     m_timeout = new QTimer(this);
@@ -179,7 +194,7 @@ PageGrabber::PageGrabber(const QUrl& url, const QString& seekProfileId, const QS
         // Cloudflare's automatic check clears itself within a few seconds; an interactive one never does.
         if (m_started.elapsed() > 8000) {
             m_page->runJavaScript(QString::fromUtf8(kChallengeJs), [this](const QVariant& challenge) {
-                if (!m_finished && challenge.toBool()) {
+                if (!m_finished && challenge.isValid() && challenge.toBool()) {
                     m_finished = true;
                     emit failed(QStringLiteral("challenge"));
                     done();
@@ -198,12 +213,16 @@ PageGrabber::PageGrabber(const QUrl& url, const QString& seekProfileId, const QS
     m_page->load(url);
 }
 
+PageGrabber::~PageGrabber() { m_finished = true; }
+
 void PageGrabber::poll() {
     m_page->runJavaScript(m_detectJs, [this](const QVariant& found) {
         if (m_finished || !found.toBool()) return;
         m_finished = true;
-        m_page->runJavaScript(QStringLiteral("document.documentElement.outerHTML"), [this](const QVariant& html) {
-            emit captured(html.toString(), m_page->url());
+        const QUrl url = m_page->url();
+        m_page->runJavaScript(QStringLiteral("document.documentElement.outerHTML"), [this, url](const QVariant& html) {
+            if (!html.isValid()) return;  // the page is being destroyed (app closing)
+            emit captured(html.toString(), url);
             done();
         });
     });
@@ -221,6 +240,8 @@ BrowserImportDialog::Options BrowserImportDialog::postingOptions(const QString&)
 BrowserImportDialog::Options BrowserImportDialog::searchOptions(const QString&) { return {}; }
 BrowserImportDialog::BrowserImportDialog(const QUrl&, const QString&, const Options& options, QWidget* parent)
     : QDialog(parent), m_options(options) {}
+BrowserImportDialog::~BrowserImportDialog() = default;
+void BrowserImportDialog::done(int result) { QDialog::done(result); }
 void BrowserImportDialog::checkPage() {}
 void BrowserImportDialog::capture() {}
 SiteSignInDialog::SiteSignInDialog(const QString& siteKey, const QString& seekProfileId, QWidget* parent)
@@ -233,6 +254,7 @@ PageGrabber::PageGrabber(const QUrl&, const QString&, const QString& detectJs, i
         deleteLater();
     });
 }
+PageGrabber::~PageGrabber() = default;
 void PageGrabber::poll() {}
 void PageGrabber::done() {}
 

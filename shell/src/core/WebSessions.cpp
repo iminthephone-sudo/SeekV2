@@ -1,33 +1,59 @@
 #include "core/WebSessions.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QHash>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QTimer>
 
 #ifdef SEEK_HAS_WEBENGINE
-#include <QNetworkCookie>
 #include <QWebEngineCookieStore>
 #include <QWebEngineLoadingInfo>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #endif
 
+namespace {
+WebSessions* g_instance = nullptr;
+const QString kPendingDelete = QStringLiteral("web/pendingDelete");
+const QStringList kStores = {QStringLiteral("linkedin"), QStringLiteral("indeed"), QStringLiteral("web")};
+}  // namespace
+
 struct WebSessions::Private {
 #ifdef SEEK_HAS_WEBENGINE
-    QHash<QString, QWebEngineProfile*> profiles;
-    QHash<QString, QList<QNetworkCookie>> cookies;  // per profile, kept current from the cookie store
+    QHash<QString, QWebEngineProfile*> profiles;  // "<profile>-<site>" -> storage
+    QList<QPointer<QWebEnginePage>> checks;       // headless pages still checking a sign-in
 #endif
 };
 
-WebSessions::WebSessions(QObject* parent) : QObject(parent), d(new Private) {}
+WebSessions::WebSessions(QObject* parent) : QObject(parent), d(new Private) {
+    // Storage folders of deleted profiles can't be removed while Chromium has them open; do it now,
+    // before any profile is created.
+    QSettings settings;
+    for (const QString& path : settings.value(kPendingDelete).toStringList())
+        if (!path.isEmpty()) QDir(path).removeRecursively();
+    settings.remove(kPendingDelete);
+}
 
-WebSessions::~WebSessions() { delete d; }
+WebSessions::~WebSessions() {
+#ifdef SEEK_HAS_WEBENGINE
+    // Pages first, then profiles: a profile released while a page still uses it is a Qt WebEngine error.
+    for (const QPointer<QWebEnginePage>& page : std::as_const(d->checks)) delete page.data();
+    qDeleteAll(d->profiles);
+#endif
+    delete d;
+}
 
 WebSessions* WebSessions::instance() {
-    static WebSessions* inst = new WebSessions(qApp);
-    return inst;
+    if (!g_instance) g_instance = new WebSessions;
+    return g_instance;
+}
+
+void WebSessions::shutdown() {
+    delete g_instance;
+    g_instance = nullptr;
 }
 
 bool WebSessions::available() {
@@ -53,6 +79,13 @@ WebSessions::Site WebSessions::site(const QString& key) {
     return {};
 }
 
+QString WebSessions::siteFor(const QUrl& url) {
+    const QString host = url.host().toLower();
+    for (const Site& s : sites())
+        if (host == s.domain || host.endsWith("." + s.domain)) return s.key;
+    return QStringLiteral("web");
+}
+
 QString WebSessions::statusFromUrl(const QString& siteKey, const QUrl& url) {
     const QString host = url.host().toLower();
     const QString path = url.path().toLower();
@@ -75,27 +108,15 @@ QString WebSessions::statusFromUrl(const QString& siteKey, const QUrl& url) {
 
 #ifdef SEEK_HAS_WEBENGINE
 
-QWebEngineProfile* WebSessions::profile(const QString& seekProfileId) {
-    const QString key = seekProfileId.isEmpty() ? QStringLiteral("shared") : seekProfileId;
+QWebEngineProfile* WebSessions::profile(const QString& seekProfileId, const QString& siteKey) {
+    const QString site = kStores.contains(siteKey) ? siteKey : QStringLiteral("web");
+    const QString key = (seekProfileId.isEmpty() ? QStringLiteral("shared") : seekProfileId) + "-" + site;
     if (QWebEngineProfile* p = d->profiles.value(key)) return p;
     // Ids are [A-Za-z0-9_-] (the engine enforces it), so they are safe as a storage folder name.
     auto* p = new QWebEngineProfile(QStringLiteral("seek-web-") + key, this);
     // The default user agent advertises "QtWebEngine/6.x", which bot filters treat as automation.
     p->setHttpUserAgent(p->httpUserAgent().remove(QRegularExpression(QStringLiteral("QtWebEngine/\\S+\\s*"))));
     p->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
-    auto* store = p->cookieStore();
-    connect(store, &QWebEngineCookieStore::cookieAdded, this, [this, key](const QNetworkCookie& c) {
-        auto& list = d->cookies[key];
-        for (const QNetworkCookie& existing : std::as_const(list))
-            if (existing.hasSameIdentifier(c)) return;
-        list.append(c);
-    });
-    connect(store, &QWebEngineCookieStore::cookieRemoved, this, [this, key](const QNetworkCookie& c) {
-        auto& list = d->cookies[key];
-        list.erase(std::remove_if(list.begin(), list.end(), [&](const QNetworkCookie& x) { return x.hasSameIdentifier(c); }),
-                   list.end());
-    });
-    store->loadAllCookies();
     d->profiles.insert(key, p);
     return p;
 }
@@ -105,7 +126,8 @@ void WebSessions::check(const QString& seekProfileId, const QString& siteKey, QO
     const Site s = site(siteKey);
     if (s.key.isEmpty()) return done(QStringLiteral("unknown"));
     // A page with no view loads headless; it only needs to follow the redirects.
-    auto* page = new QWebEnginePage(profile(seekProfileId), this);
+    auto* page = new QWebEnginePage(profile(seekProfileId, siteKey), this);
+    d->checks.append(page);
     auto* settle = new QTimer(page);
     settle->setSingleShot(true);
     settle->setInterval(2000);  // wait for script redirects after the load finishes
@@ -113,7 +135,7 @@ void WebSessions::check(const QString& seekProfileId, const QString& siteKey, QO
     giveUp->setSingleShot(true);
     giveUp->setInterval(30000);
     QPointer<QObject> guard(context);
-    auto finish = [page, guard, done, siteKey](const QString& forced) {
+    auto finish = [this, page, guard, done, siteKey](const QString& forced) {
         if (page->property("seekDone").toBool()) return;
         page->setProperty("seekDone", true);
         QString status = forced;
@@ -126,6 +148,7 @@ void WebSessions::check(const QString& seekProfileId, const QString& siteKey, QO
                                                       QRegularExpression::CaseInsensitiveOption);
             if (challenge.match(page->title()).hasMatch() || status.isEmpty()) status = QStringLiteral("unknown");
         }
+        d->checks.removeAll(QPointer<QWebEnginePage>(page));
         page->deleteLater();
         if (guard) done(status);
     };
@@ -144,27 +167,32 @@ void WebSessions::check(const QString& seekProfileId, const QString& siteKey, QO
 }
 
 void WebSessions::signOut(const QString& seekProfileId, const QString& siteKey) {
-    const Site s = site(siteKey);
-    QWebEngineProfile* p = profile(seekProfileId);
-    const QString key = seekProfileId.isEmpty() ? QStringLiteral("shared") : seekProfileId;
-    const QList<QNetworkCookie> list = d->cookies.value(key);
-    for (const QNetworkCookie& c : list) {
-        const QString domain = c.domain().toLower();
-        if (domain == s.domain || domain.endsWith("." + s.domain)) p->cookieStore()->deleteCookie(c);
-    }
+    // The site has its own storage, so "delete all" removes exactly that site's sign-in — also cookies
+    // persisted by an earlier session, which cookieAdded never reports.
+    QWebEngineProfile* p = profile(seekProfileId, siteKey);
+    p->cookieStore()->deleteAllCookies();
+    p->clearHttpCache();
 }
 
 void WebSessions::forget(const QString& seekProfileId) {
     if (seekProfileId.isEmpty()) return;
-    QWebEngineProfile* p = profile(seekProfileId);
-    p->cookieStore()->deleteAllCookies();
-    p->clearHttpCache();
-    p->clearAllVisitedLinks();
+    QSettings settings;
+    QStringList pending = settings.value(kPendingDelete).toStringList();
+    for (const QString& site : kStores) {
+        QWebEngineProfile* p = profile(seekProfileId, site);
+        p->cookieStore()->deleteAllCookies();
+        p->clearHttpCache();
+        p->clearAllVisitedLinks();
+        // History, local storage and the rest go with the folders, removed at the next start.
+        pending << p->persistentStoragePath() << p->cachePath();
+    }
+    pending.removeDuplicates();
+    settings.setValue(kPendingDelete, pending);
 }
 
 #else  // built without Qt WebEngine
 
-QWebEngineProfile* WebSessions::profile(const QString&) { return nullptr; }
+QWebEngineProfile* WebSessions::profile(const QString&, const QString&) { return nullptr; }
 void WebSessions::check(const QString&, const QString&, QObject* context, std::function<void(const QString&)> done) {
     QPointer<QObject> guard(context);
     QTimer::singleShot(0, this, [guard, done] {

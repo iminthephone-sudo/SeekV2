@@ -138,7 +138,8 @@ A job record includes `keywords[{term, key, score, kind: skill|phrase, category,
 | `optimize.match` | `profile_id`, `job_id` | `{score, grade, matched[], missing[], add_to_skills[], confirm_skills[], bullet_ranking[], suggested_headline, tips[]}` |
 | `optimize.apply` | `profile_id`, `job_id`, `add_skills[]`, `headline?`, `reorder?`, `as_copy?` | `{profile, match}` |
 | `letter.generate` | `profile_id`, `job_id?`, `tone?`, `hiring_manager?`, `availability?`, `fair_chance_line?`, `personal_note?`, `save?` | `{text, word_count, evidence_count, match_score, letter?}` |
-| `letter.save` / `letter.get` / `letter.list` / `letter.delete` | … | |
+| `letter.save` | `letter_id`, `text`, `title?` — or, with no `letter_id`, `profile_id`, `job_id?`, `text`, `title?` to create the letter in one call | the saved letter |
+| `letter.get` / `letter.list` / `letter.delete` | … | |
 | `letter.export` | `letter_id`, `format` = `docx`\|`txt`, `path` | written path |
 | `letter.tones` | – | `professional, warm, direct` |
 

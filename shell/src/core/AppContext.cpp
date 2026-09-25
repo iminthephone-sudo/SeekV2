@@ -24,10 +24,15 @@ void AppContext::refreshProfiles() {
     m_bridge->call("profile.list", [this](const QJsonValue& result, const BridgeError& err) {
         if (err.isError()) return reportError(tr("Loading profiles"), err);
         m_profiles = result.toArray();
-        for (const QJsonValue& p : std::as_const(m_profiles)) {
-            if (p.toObject().value("active").toBool()) m_activeProfile = jstr(p, "id");
-        }
+        // The engine picks a new active profile when the active one is deleted (or clears it when none are
+        // left): follow it, and say so, so nothing keeps using a deleted profile's id.
+        QString active;
+        for (const QJsonValue& p : std::as_const(m_profiles))
+            if (p.toObject().value("active").toBool()) active = jstr(p, "id");
+        const bool changed = active != m_activeProfile;
+        m_activeProfile = active;
         emit profilesChanged();
+        if (changed) emit activeProfileChanged(active);
     }, this);
 }
 

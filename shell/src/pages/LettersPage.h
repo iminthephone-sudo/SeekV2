@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "ui/Widgets.h"
 
 class AppContext;
@@ -17,12 +19,16 @@ public:
 
 private:
     void generate();
-    void saveLetter();
+    void runGenerate();
+    // Saves the editor; ``then`` runs only after the engine confirmed the save.
+    void saveLetter(std::function<void()> then = {});
     void refreshList();
     void openLetter(const QString& id);
     void exportAs(const QString& format);
     void setDirty(bool dirty);
-    bool confirmDiscard();
+    // Unsaved letter? Ask; Save runs ``next`` after the save succeeds, Discard reverts first, Cancel skips it.
+    void resolveUnsaved(std::function<void()> next);
+    void revert();
 
     AppContext* m_ctx;
     QListWidget* m_list;
@@ -39,4 +45,5 @@ private:
     QString m_letterId;
     bool m_dirty = false;
     bool m_loading = false;
+    int m_session = 0;  // bumped when another letter (or a new one) is opened; stale save replies are ignored
 };

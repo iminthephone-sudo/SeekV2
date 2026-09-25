@@ -264,6 +264,9 @@ QWidget* InterviewPage::buildStarsTab() {
 }
 
 void InterviewPage::loadBanks() {
+    // The question banks never change while SEEK runs; after an engine restart (ready fires again) keep the
+    // lists — and the answers in progress — as they are.
+    if (!m_questions.isEmpty() && !m_rows.isEmpty()) return;
     m_ctx->bridge()->call("interview.stars_questions", [this](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Loading questions"), e);
         m_questions = r.toObject().value("questions").toArray();
@@ -618,8 +621,9 @@ QWidget* InterviewPage::buildSavedTab() {
     connect(del, &QPushButton::clicked, this, [this] {
         const int row = m_saved->currentRow();
         if (row < 0 || row >= m_savedRows.size()) return;
+        const QString id = jstr(m_savedRows.at(row), "id");  // before the question: the list can refresh meanwhile
         if (QMessageBox::question(this, tr("Delete practice"), tr("Delete this saved practice?")) != QMessageBox::Yes) return;
-        m_ctx->bridge()->call("interview.delete", {{"record_id", jstr(m_savedRows.at(row), "id")}},
+        m_ctx->bridge()->call("interview.delete", {{"record_id", id}},
                               [this](const QJsonValue&, const BridgeError& e) {
             if (e.isError()) return m_ctx->reportError(tr("Deleting practice"), e);
             refreshSaved();

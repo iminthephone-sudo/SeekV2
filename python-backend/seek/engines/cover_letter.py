@@ -224,7 +224,20 @@ class CoverLetterEngine:
             result["letter"] = letter
         return result
 
-    def save(self, letter_id: str, text: str, title: str = "") -> dict[str, Any]:
+    def save(self, letter_id: str = "", text: str = "", title: str = "", profile_id: str = "",
+             job_id: str = "") -> dict[str, Any]:
+        """Save a letter's text. Without ``letter_id`` a new letter is created in this one call (a hand-written
+        letter must never depend on a second request arriving)."""
+        if not letter_id:
+            profile = self.profiles.get(profile_id)
+            job = self.store.get("jobs", job_id) if job_id else None
+            letter = {"id": new_id("ltr"), "profile_id": profile_id, "job_id": job_id or "",
+                      "title": title or f"{profile.get('name')} → {(job or {}).get('company') or (job or {}).get('title') or 'General'}",
+                      "text": as_text(text), "tone": "", "created_at": utc_now(), "updated_at": utc_now()}
+            self.store.put(COLLECTION, letter["id"], letter)
+            self.store.append_history("letter", f"Wrote cover letter '{letter['title']}'", letter_id=letter["id"],
+                                      profile_id=profile_id, job_id=job_id)
+            return letter
         letter = self.get(letter_id)
         letter["text"] = as_text(text)
         if title:

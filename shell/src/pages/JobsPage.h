@@ -16,6 +16,7 @@ class QPlainTextEdit;
 class QProgressBar;
 class QStackedWidget;
 class QTextBrowser;
+class QTimer;
 
 class JobsPage : public Page {
     Q_OBJECT
@@ -33,6 +34,7 @@ private:
     void addResults(const QJsonArray& rows);
     void finishSearchStep();
     void importResult(int row);
+    void flushNotes();
     void analyzePaste();
     void rebuildList();
     void showJob(const QString& id);
@@ -81,4 +83,7 @@ private:
     QPlainTextEdit* m_notes;
     QPushButton* m_openLink;
     QJsonObject m_job;
+    QTimer* m_notesTimer;
+    QString m_notesJobId;  // the posting the notes box belongs to
+    QString m_notesSaved;
 };

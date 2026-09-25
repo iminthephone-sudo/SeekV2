@@ -15,6 +15,7 @@
 
 #include "core/AppContext.h"
 #include "core/Theme.h"
+#include "core/WebSessions.h"
 #include "ui/MainWindow.h"
 
 int main(int argc, char* argv[]) {
@@ -34,6 +35,8 @@ int main(int argc, char* argv[]) {
     Theme::instance()->apply();
     app.setWindowIcon(Theme::instance()->appIcon());
 
+    int code = 0;
+    {  // the window and every page are destroyed at the end of this block, before the browser sessions
     AppContext ctx;
     MainWindow window(&ctx);
     window.show();
@@ -72,7 +75,10 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    const int code = app.exec();
+    code = app.exec();
     ctx.bridge()->stop();
+    }
+    // Qt WebEngine must be torn down after its pages and before QApplication.
+    WebSessions::shutdown();
     return code;
 }

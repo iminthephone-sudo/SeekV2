@@ -140,8 +140,9 @@ DutiesHelpDialog::DutiesHelpDialog(AppContext* ctx, const QString& title, const 
     col->addWidget(scrolled(inner), 1);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel);
-    auto* apply = buttons->addButton(tr("Apply to bullets"), QDialogButtonBox::AcceptRole);
-    apply->setProperty("accent", true);
+    m_apply = buttons->addButton(tr("Apply to bullets"), QDialogButtonBox::AcceptRole);
+    m_apply->setProperty("accent", true);
+    m_apply->setEnabled(false);  // until the rewrites arrive: applying an empty list would wipe the bullets
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, this, [this] {
         emit applied(result());
@@ -157,8 +158,10 @@ void DutiesHelpDialog::reload() {
     for (const QString& b : std::as_const(m_bullets)) bullets.append(b);
     const QJsonObject params{{"title", m_title}, {"bullets", bullets}, {"current", m_current},
                              {"job_id", m_job->currentData().toString()}};
+    m_apply->setEnabled(false);
     m_ctx->bridge()->call("assist.duties", params, [this](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Writing help"), e);
+        m_apply->setEnabled(true);
         const QJsonObject res = r.toObject();
         const auto& t = Theme::instance()->p();
         ui::clearLayout(m_mine);
@@ -221,6 +224,7 @@ void DutiesHelpDialog::reload() {
 }
 
 QStringList DutiesHelpDialog::result() const {
+    if (m_rows.isEmpty() && !m_bullets.isEmpty()) return m_bullets;  // never replace bullets with nothing
     QStringList out;
     for (const Row& r : m_rows) {
         const QString text = (r.use->isChecked() ? r.text->text() : r.original).trimmed();
