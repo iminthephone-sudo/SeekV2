@@ -20,10 +20,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..storage import Store
+from ..storage import NotFound, Store, as_list
 from .fair_chance import _scan as scan_sensitive
 from .fair_chance import parse_when
-from .nlp import NLP, stem
+from .nlp import NLP, article, needs_exact, stem
 from .profiles import ProfileEngine, normalize, profile_text
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
@@ -41,8 +41,28 @@ IRREGULAR_PAST = {
     "split": "split", "stand": "stood", "stick": "stuck", "strike": "struck", "sweep": "swept", "swing": "swung",
     "take": "took", "teach": "taught", "tear": "tore", "think": "thought", "throw": "threw",
     "understand": "understood", "undertake": "undertook", "wake": "woke", "wear": "wore", "win": "won",
-    "wind": "wound", "write": "wrote", "rewrite": "rewrote",
+    "wind": "wound", "write": "wrote", "rewrite": "rewrote", "break": "broke", "tell": "told", "begin": "began",
+    "choose": "chose", "draw": "drew", "hear": "heard", "let": "let", "quit": "quit", "seek": "sought",
+    "become": "became", "fall": "fell", "spread": "spread", "shoot": "shot", "forget": "forgot", "ring": "rang",
+    "sing": "sang", "drink": "drank", "eat": "ate", "fly": "flew", "forgive": "forgave", "hide": "hid", "rise": "rose",
+    "slide": "slid", "steal": "stole", "sting": "stung", "swim": "swam", "bite": "bit", "blow": "blew", "hurt": "hurt",
+    "cast": "cast", "cost": "cost", "bet": "bet", "burst": "burst", "overcome": "overcame", "undergo": "underwent",
+    "uphold": "upheld", "withstand": "withstood", "broadcast": "broadcast", "shed": "shed", "bleed": "bled",
+    "breed": "bred", "flee": "fled", "speed": "sped", "cling": "clung", "string": "strung", "sink": "sank",
+    "shrink": "shrank", "grind": "ground", "weave": "wove", "stride": "strode", "arise": "arose", "awake": "awoke",
+    "forecast": "forecast", "mislead": "misled", "outdo": "outdid", "overhear": "overheard", "oversee": "oversaw",
+    "overtake": "overtook", "override": "overrode", "retake": "retook", "rerun": "reran", "resell": "resold",
+    "retell": "retold", "rethink": "rethought", "upset": "upset", "input": "input", "output": "output",
 }
+PAST_TO_BASE = {v: k for k, v in IRREGULAR_PAST.items() if v != k}
+# Same spelling in both tenses ("Read blueprints…"): the tense of the words listed after them can't be inferred.
+SAME_FORMS = {k for k, v in IRREGULAR_PAST.items() if k == v}
+# -ing words that are almost always nouns after "responsible for" ("building maintenance", "morning prep").
+ING_NOUNS = {"building", "morning", "evening", "ceiling", "housing", "spring", "clothing", "dining", "parking",
+             "flooring", "roofing", "siding", "lighting", "plumbing", "wiring", "bedding", "lodging", "heating",
+             "awning", "boarding", "catering", "landscaping", "shipping", "receiving", "nothing", "something",
+             "everything", "anything", "thing", "king", "string", "ring", "wing", "sibling", "offspring", "pudding",
+             "icing", "stuffing", "seasoning", "dressing", "frosting", "filling", "topping", "coating"}
 # Two-syllable verbs stressed on the last syllable double the final consonant.
 DOUBLE_FINAL = {"control", "patrol", "equip", "refer", "transfer", "commit", "submit", "admit", "permit", "occur",
                 "prefer", "compel", "expel", "propel", "regret"}
@@ -135,17 +155,27 @@ class WritingAssist:
         if len(probe) <= skip:
             return text, False, 0
         head = probe[skip]
-        if head.pos_ not in ("VERB", "AUX") or head.lemma_.lower() in ("be", "have"):
+        head_lemma = head.lemma_.lower()
+        if head.pos_ not in ("VERB", "AUX"):
+            # "Tutor learners…": tagged as a noun, but it works as a verb and is followed by its object.
+            nxt = probe[head.i + 1] if head.i + 1 < len(probe) else None
+            head_lemma = self._verb_lemma(head.text) if nxt is not None and nxt.pos_ in ("NOUN", "DET", "PRON", "ADJ") else ""
+            if not head_lemma or head.text.isupper():
+                return text, False, 0
+        if head_lemma in ("be", "have"):
             return text, False, 0
-        verbs = {head.i: head.lemma_.lower()}
+        verbs = {head.i: head_lemma}
         for c in head.conjuncts:
-            if c.pos_ == "VERB" and c.i > head.i:
+            # Same verb form as the opener only: in "Installed framing and trim", "framing" isn't a verb.
+            if head.lower_ in SAME_FORMS:
+                break  # "Read … and weld …": the tense of the list can't be told, so leave it as written
+            if c.pos_ == "VERB" and c.i > head.i and (c.tag_ == head.tag_ or {c.tag_, head.tag_} <= {"VB", "VBP"}):
                 verbs[c.i] = c.lemma_.lower()
         # The small model often tags a listed verb as a noun ("load and unload trucks", "stocking shelves,
         # cleaning, and helping"). A word right after a list separator counts when it has the same form as the
         # opening verb and really is a verb.
         gerund = head.tag_ == "VBG"
-        for tok in probe[head.i + 1:]:
+        for tok in ([] if head.lower_ in SAME_FORMS else probe[head.i + 1:]):
             if tok.i in verbs or tok.i == 0 or probe[tok.i - 1].text not in (",", "and", "or"):
                 continue
             sep = probe[tok.i - 1]
@@ -159,27 +189,55 @@ class WritingAssist:
             elif sep.text in ("and", "or"):
                 nxt = probe[tok.i + 1] if tok.i + 1 < len(probe) else None
                 # "…and unload trucks": joined to the verb, or followed by its own object.
-                attached = sep.head.i == head.i or (nxt is not None and nxt.pos_ in ("NOUN", "PROPN", "DET", "NUM", "ADJ"))
-                lemma = self._verb_lemma(tok.text) if attached else ""
+                attached = sep.head.i == head.i or (nxt is not None and (nxt.pos_ in ("NOUN", "PROPN", "DET", "NUM", "ADJ")
+                                                                          or nxt.tag_ in ("VBG", "NN", "NNS")))
+                lemma = self._base(tok, self._verb_lemma(tok.text)) if attached else ""
                 if lemma and self._same_form(tok.lower_, lemma, head):
                     verbs[tok.i] = lemma
         out, changed = [], False
         for tok in probe[skip:]:
             word = tok.text
-            if tok.i in verbs:
-                lemma = verbs[tok.i]
-                if tok.tag_ in ("VBD", "VBN") and past_tense(lemma) != tok.lower_:
-                    # The lemmatizer sometimes over-strips ("staged" -> "stag"); pick the base that inflects back.
-                    lemma = next((c for c in (tok.lower_[:-1], tok.lower_[:-2], tok.lower_[:-3])
-                                  if c and past_tense(c) == tok.lower_), lemma)
-                want = self._verb_form(lemma, past)
-                if want != tok.lower_:
+            if tok.i in verbs and not self._already(tok, past):
+                base = self._base(tok, verbs[tok.i])
+                want = self._verb_form(base, past) if base else ""
+                if want and want != tok.lower_:  # no reliable base form: leave the word as it was written
                     word, changed = want, True
             out.append(word + tok.whitespace_)
         rebuilt = "".join(out).strip()
         # "Helped load trucks": the verb run includes an infinitive after the opener.
         last = max([*verbs, *(c.i for c in head.children if c.dep_ == "xcomp" and c.pos_ == "VERB")])
         return _cap(rebuilt), changed, last - skip + 1
+
+    @staticmethod
+    def _already(tok, past: bool) -> bool:
+        """Is the verb already in the tense we want? Then it's never touched ("Broke down" stays)."""
+        w = tok.lower_
+        if past:
+            return tok.tag_ in ("VBD", "VBN") or w in PAST_TO_BASE or (w.endswith("ed") and tok.tag_ != "VBG")
+        return tok.tag_ in ("VB", "VBP") and w not in PAST_TO_BASE and not w.endswith("ed")
+
+    def _base(self, tok, lemma: str) -> str:
+        """A base form we trust for ``tok``, or "" when the lemmatizer's guess can't be verified."""
+        w = tok.lower_
+        lemma = (lemma or "").lower()
+        if tok.text.isupper() and len(tok.text) > 1:
+            return ""  # acronyms ("GED", "OSHA") are never verbs
+        if w in PAST_TO_BASE:
+            return PAST_TO_BASE[w]
+        if w in IRREGULAR_PAST:
+            return w
+        if w.endswith("ed"):  # verify by inflecting back: "staged" -> "stage" (not "stag"), "installed" -> "install"
+            cands = ([w[:-3] + "y"] if w.endswith("ied") else []) + [lemma, w[:-2], w[:-1], w[:-3]]
+            return next((c for c in cands if c and past_tense(c) == w and self._verb_lemma(c)
+                         and self._verb_lemma(c) in (c, lemma)), "")
+        if w.endswith("ing"):
+            cands = [lemma, w[:-3], w[:-3] + "e", w[:-4]]
+            return next((c for c in cands if c and len(c) > 1 and self._verb_lemma(c) == c
+                         and (c + "ing" == w or c[:-1] + "ing" == w or c + c[-1] + "ing" == w)), "")
+        if w.endswith("s") and tok.tag_ == "VBZ":
+            cands = ([w[:-3] + "y"] if w.endswith("ies") else []) + ([w[:-2]] if w.endswith("es") else []) + [w[:-1]]
+            return next((c for c in cands if c and self._verb_lemma(c) == c), "")
+        return w if self._verb_lemma(w) else ""  # a base form written as is ("Ring up", "Load")
 
     @staticmethod
     def _same_form(word: str, lemma: str, head) -> bool:
@@ -246,7 +304,13 @@ class WritingAssist:
             if not m:
                 continue
             rest = m.group(1)
-            if rest.split()[0].lower().endswith("ing"):
+            first = rest.split()[0].lower()
+            gerund = first.endswith("ing") and first not in ING_NOUNS and bool(self._verb_lemma(first))
+            if verb == "Helped" and not gerund and self._verb_lemma(first) == first:
+                clean = "Helped " + rest  # "Helped to load trucks" -> "Helped load trucks"
+            elif verb == "Helped" and not gerund:
+                clean = "Assisted with " + rest  # "Helped with spring cleaning"
+            elif gerund:
                 # "Responsible for cleaning the kitchen" -> "Cleaning the kitchen" -> (tense) "Cleaned the kitchen"
                 if verb == "Helped":  # "Helped with loading trucks" -> "Helped load trucks"
                     words = rest.split(" ", 1)
@@ -305,7 +369,7 @@ class WritingAssist:
 
     def duties(self, title: str = "", bullets: list[str] | None = None, current: bool = False, job_id: str = "",
                employer: str = "") -> dict[str, Any]:
-        bullets = [b for b in (bullets or []) if str(b).strip()]
+        bullets = as_list(bullets)
         past = not current
         rewrites = [self.rewrite_bullet(b, past=past) for b in bullets]
         have = [self._words(b) for b in bullets]
@@ -335,21 +399,30 @@ class WritingAssist:
 
     # -- summary ---------------------------------------------------------------------------------
     def _months_worked(self, profile: dict[str, Any]) -> int:
+        """Months of work, overlaps merged. A year with no month ("2019") is read as mid-year, so "2019–2020"
+        counts as 12 months: a summary must never claim more time than the participant may have worked."""
+        year_only = re.compile(r"^\s*\d{4}\s*$")
         spans = []
         for x in profile.get("experience", []):
-            start = parse_when(x.get("start", ""))
-            end = parse_when(x.get("end", "") or "present", is_end=True)
-            if start and end and end >= start:
-                spans.append((start, end))
+            raw_start, raw_end = str(x.get("start", "") or ""), str(x.get("end", "") or "")
+            start = parse_when(raw_start)
+            end = parse_when(raw_end or "present", is_end=True)
+            if not (start and end):
+                continue
+            if year_only.match(raw_start):
+                start = start.replace(month=7)
+            if year_only.match(raw_end):
+                end = end.replace(month=6)
+            spans.append((start, max(start, end)))
         spans.sort()
         months, cur_start, cur_end = 0, None, None
-        for s, e in spans:  # merge overlapping jobs so they aren't counted twice
-            if cur_end and s <= cur_end:
+        for s_, e in spans:  # merge overlapping jobs so they aren't counted twice
+            if cur_end and s_ <= cur_end:
                 cur_end = max(cur_end, e)
                 continue
             if cur_start:
                 months += (cur_end.year - cur_start.year) * 12 + cur_end.month - cur_start.month + 1
-            cur_start, cur_end = s, e
+            cur_start, cur_end = s_, e
         if cur_start:
             months += (cur_end.year - cur_start.year) * 12 + cur_end.month - cur_start.month + 1
         return months
@@ -394,7 +467,7 @@ class WritingAssist:
         if job:
             prof = self.nlp.profile_text(profile_text(profile))
             for kw in job.get("keywords", [])[:30]:
-                if self.nlp.covers(prof, kw["key"]):
+                if self.nlp.covers(prof, kw["key"], strict=needs_exact(kw)):
                     add_skill(kw["term"], matched)
         skills = list(matched)
         for sk in profile.get("skills", []):
@@ -449,13 +522,23 @@ class WritingAssist:
             profile = normalize({**profile, **data, "id": profile_id})
         job = self.store.get("jobs", job_id) if job_id else None
         if job_id and job is None:
-            raise KeyError(f"job not found: {job_id}")
+            raise NotFound(f"job not found: {job_id}")
         f = self.summary_facts(profile, job)
         current = profile.get("summary", "") if text is None else text
-        role = f["role"] or "Entry-level worker"
+        role = f["role"]
         role_lower = role  # job titles keep their capitals mid-sentence ("a Forklift Operator role")
-        skills = [_mid(x) for x in f["skills"]]
-        matched = [_mid(x) for x in f["matched"]]
+        role_key = self.nlp.key(role) if role else ""
+        # "Line Cook with experience in line cook" — the role isn't also one of the skills.
+        skills = [_mid(x) for x in f["skills"] if self.nlp.key(x) != role_key]
+        matched = [_mid(x) for x in f["matched"] if self.nlp.key(x) != role_key]
+        if not (role or skills or f["certifications"]):
+            return {"facts": f, "review": self.review_summary(current, f), "drafts": [],
+                    "note": "Add work experience, skills or certificates to the profile first — drafts are built only "
+                            "from what's in it."}
+        role = role or "Entry-level worker"
+        role_lower = role
+        with_exp = f" with {f['years_phrase']} experience" if f["months"] else ""
+        title_phrase = lambda t: f" as {article(t)} {t}"  # noqa: E731
         certs = f["certifications"]
         strengths = f["strengths"] or []
 
@@ -468,27 +551,30 @@ class WritingAssist:
                 drafts.append({"label": label, "text": body, "words": str(len(body.split()))})
 
         # 1. Experience-led.
-        exp = (f"{_cap(role_lower)} with {f['years_phrase']} experience" +
-               (f" as a {_join([t for t in f['titles'][:2]])}" if f["titles"] and f["titles"][0].lower() != role.lower() else "") +
-               (f" in {_join(skills[:3])}." if skills else "."))
+        exp = (f"{_cap(role_lower)}{with_exp}" +
+               (title_phrase(_join(f["titles"][:2])) if with_exp and f["titles"] and f["titles"][0].lower() != role.lower()
+                else "") +
+               ((" in " if with_exp else " skilled in ") + f"{_join(skills[:3])}." if skills else "."))
         add("Experience first", [
             exp,
             f"Holds {_join(certs)}." if certs else "",
             (f"Known for {_join(strengths)}; " if strengths else "") +
-            (f"ready to bring {_join(skills[3:5] or skills[:2])} to {f['company'] or 'a team that values steady, careful work'}."
-             if skills else ""),
+            (f"ready to bring {_join(skills[3:5])} to {f['company'] or 'a team that values steady, careful work'}."
+             if skills[3:5] else f"ready to bring that experience to {f['company'] or 'a new team'}."),
         ])
         # 2. Skills-first and short.
         add("Skills first", [
-            f"{_cap(_join(skills[:4]))} — {'certified in ' + _join(certs[:2]) + ', ' if certs else ''}"
-            f"with {f['years_phrase']} experience{' as a ' + f['titles'][0] if f['titles'] else ''}." if skills else "",
-            f"Looking for a {role_lower} role" + (f" at {f['company']}" if f["company"] else "") + " to grow with.",
+            (f"{_cap(_join(skills[:4]))} — {'certified in ' + _join(certs[:2]) + ', ' if certs else ''}"
+             + (f"{with_exp.strip()}{title_phrase(f['titles'][0]) if f['titles'] else ''}." if with_exp
+                else "ready to learn and grow.")) if skills else "",
+            f"Looking for {article(role_lower)} {role_lower} role" + (f" at {f['company']}" if f["company"] else "")
+            + " to grow with.",
         ])
         # 3. Posting-targeted, when a posting is chosen and there are real matches.
         if job and matched:
             add("Aimed at this posting", [
                 f"{_cap(role_lower)} candidate bringing {_join(matched[:3])}" +
-                (f", with {f['years_phrase']} experience as a {f['titles'][0]}" if f["titles"] else "") + ".",
+                (f",{with_exp}{title_phrase(f['titles'][0])}" if with_exp and f["titles"] else "") + ".",
                 f"Holds {_join(certs[:2])}." if certs else "",
                 f"Ready to {('support ' + f['company']) if f['company'] else 'contribute from day one'}"
                 + (f" with the {_join(strengths)} employers look for." if strengths else "."),

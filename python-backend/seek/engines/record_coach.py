@@ -24,10 +24,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..storage import Store, new_id, utc_now
+from ..storage import NotFound, Store, as_text, new_id, utc_now
 from .fair_chance import _scan as scan_sensitive
 from .fair_chance import parse_when
-from .nlp import NLP
+from .nlp import NLP, article, straight_quotes
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
 COLLECTION = "interview"
@@ -79,24 +79,26 @@ PIVOT_CUES = [
 
 # Details that pull the conversation back into the offense or the court case.
 OVERSHARE = [
-    r"\b(gun|pistol|firearm|knife|weapon|stab|stabbed|robbed|robbery|assault(ed)?|overdose)\b",
-    r"\b(pounds?|grams?|ounces?|kilos?|bags?) of\b", r"\b(cocaine|heroin|crack|meth|fentanyl|weed|pills)\b",
+    r"\b(gun|pistol|firearm|knife(?! skills)|weapon|stab|stabbed|robbed|robbery|assault(ed)?|overdose)\b",
+    r"\b(pounds?|grams?|ounces?|kilos?|bags?) of (cocaine|heroin|crack|meth|fentanyl|weed|marijuana|pills|drugs?|dope)\b",
+    r"\b(cocaine|heroin|crack|meth|fentanyl|weed|pills)\b",
     r"\b(plea deal|pled|pleaded|plea|trial(?! period)|jury|judge|prosecutor|district attorney|\bda\b|public defender|lawyer|attorney|"
     r"appeal|arraign\w*|indict\w*|court date|sentencing|sentenced to \d+|years? (in|at) \w+ (prison|state)|"
     r"cell ?(mate|block)|solitary|the hole)\b",
 ]
 BLAME = [
     r"\bwrong place\b", r"\bwrong time\b", r"\bset me up\b", r"\bnot my fault\b", r"\bthe cops?\b", r"\bpolice (were|was)\b",
-    r"\bthe system\b", r"\bmy (lawyer|public defender) (didn'?t|never)\b", r"\bframed\b", r"\b(bad|wrong) crowd\b",
-    r"\bthey (made|forced|put)\b", r"\bunfair(ly)?\b", r"\bit wasn'?t (me|mine)\b", r"\beveryone (was|does)\b",
+    r"\bthe system (is|was) (rigged|unfair|against|broken|corrupt)", r"\bmy (lawyer|public defender) (didn'?t|never)\b",
+    r"\bframed\b", r"\b(bad|wrong) crowd\b", r"\bthey (made|forced) me\b", r"\bunfair(ly)?\b", r"\bit wasn'?t (me|mine)\b",
+    r"\beveryone (was|does) (doing )?(it|that)\b",
     r"\bbecause of (him|her|them|my (ex|friends|cousin|brother))\b",
 ]
 MINIMIZE = [
-    r"\b(it was )?(just|only) a\b", r"\bno big deal\b", r"\bnot a big deal\b", r"\bminor thing\b",
+    r"\b(it was )?(just|only) a (little|small|minor|misunderstanding)\b", r"\bno big deal\b", r"\bnot a big deal\b", r"\bminor thing\b",
     r"\beveryone does\b", r"\bit happens\b", r"\bbasically nothing\b", r"\bnobody got hurt\b", r"\bjust (some|a little)\b",
 ]
 SLANG = {
-    r"\bcaught a (case|charge)\b": "was charged", r"\bdid (a )?(bid|time)\b": "was incarcerated", r"\blocked up\b": "incarcerated",
+    r"\bcaught a (case|charge)\b": "was charged", r"\bdid (a |my )?(bid|time)\b(?! management)": "was incarcerated", r"\blocked up\b": "incarcerated",
     r"\bthe feds\b": "federal", r"\bmy po\b": "my parole/probation officer",
     r"\bgot out (in|of prison|of jail)\b": "was released", r"\bthe yard\b": "the facility",
     r"\bthe c\.?o\.?s?\b(?!-)": "staff", r"\bpinched\b": "arrested",
@@ -109,6 +111,20 @@ LEGAL_NOTE = ("Know exactly what you have to disclose. Rules differ by state and
               "records and arrests that didn't lead to a conviction often don't have to be shared. Check with your "
               "outreach team before the interview. Never lie: background checks find it, and dishonesty is the most "
               "common reason an otherwise good candidate is turned down.")
+# Saying there is no record. If that's true the participant doesn't need this practice; if there is a record the
+# employer may lawfully ask about, a denial is the one answer that reliably loses the job.
+DENIAL = [
+    r"\b(never|not|haven'?t|have not|wasn'?t|was not|didn'?t|did not)\b[^.]{0,25}\b(convicted|arrested|charged|"
+    r"incarcerated|in (jail|prison))\b",
+    r"\b(my )?record is (clean|clear)\b", r"\bi (don'?t|do not) have (a|any) (criminal )?(record|convictions?|felon(y|ies))\b",
+    r"\bno (criminal )?record\b", r"\b(left|didn'?t check|did not check)\b[^.]{0,20}\bbox\b", r"\bleft (it|that) blank\b",
+]
+DENIAL_CAP = 40
+# Saying the report is wrong. That can be true (a sealed record that still shows up), but the interview isn't the
+# place to argue it: background-check reports can be disputed with the company that made them.
+DISPUTE = [r"\b(not|shouldn'?t|should not) (be )?(on|in) my record\b", r"\bshould(n'?t| not) be (there|on (it|there))\b",
+           r"\bnot on my record anymore\b", r"\b(mistake|error|wrong) (on|in) (the|my|that) (report|record|check)\b",
+           r"\b(the|that) (report|check) is wrong\b"]
 _NUMBER = re.compile(r"\d|\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|dozen|hundred|once|twice|"
                      r"weekly|monthly|daily)\b", re.I)
 
@@ -146,13 +162,14 @@ class RecordCoach:
 
     def _question(self, question_id: str, custom_question: str = "") -> dict[str, Any]:
         if question_id == "custom":
+            custom_question = as_text(custom_question)
             if not custom_question.strip():
                 raise ValueError("Type the question you want to practise.")
             return {"id": "custom", "category": "Custom", "question": custom_question.strip(), "looking_for": "",
                     "tip": "", "example": "", "moves": list(ELEMENTS)}
         q = self._by_id.get(question_id)
         if q is None:
-            raise KeyError(f"question not found: {question_id}")
+            raise NotFound(f"question not found: {question_id}")
         return q
 
     # -- sentence analysis -------------------------------------------------------------------------
@@ -191,7 +208,7 @@ class RecordCoach:
     def coach(self, question_id: str, answer: str, custom_question: str = "", profile_id: str = "",
               save: bool = False) -> dict[str, Any]:
         q = self._question(question_id, custom_question)
-        answer = re.sub(r"[ \t]+", " ", (answer or "")).strip()
+        answer = re.sub(r"[ \t]+", " ", straight_quotes(answer or "")).strip()
         if len(answer.split()) < 3:
             raise ValueError("Write out your answer the way you'd say it, then ask for coaching.")
         doc = self.nlp.doc(answer)
@@ -203,6 +220,8 @@ class RecordCoach:
         present: dict[str, list[int]] = {k: [] for k in ELEMENTS}
         for i, sent in enumerate(sentences):
             moves = self._classify(sent)
+            if _any(DENIAL, sent.text):
+                moves = [m for m in moves if m != "acknowledge"]  # a denial isn't an honest answer
             for m in moves:
                 present[m].append(i)
             rows.append({"text": sent.text.strip(), "moves": moves, "tense": self._tense(sent)})
@@ -212,11 +231,28 @@ class RecordCoach:
         def issue(kind: str, message: str, found: list[str] | None = None) -> None:
             issues.append({"kind": kind, "message": message, "found": ", ".join(dict.fromkeys(found or []))})
 
-        blame = _any(BLAME, answer)
+        denial = _any(DENIAL, answer)
+        if denial:
+            issue("denial", "This answer says there is no record. If that's true, say it plainly in one sentence. If there "
+                            "is a record the employer is allowed to ask about, never deny it — background checks find it, "
+                            "and it's the most common reason people lose the offer. If it was sealed or expunged, check "
+                            "with your outreach team what you may say.", denial)
+        if denial:
+            present["acknowledge"] = []
+        dispute = _any(DISPUTE, answer)
+        if dispute:
+            issue("dispute", "If the report shows something that was sealed, expunged or isn't yours, you have the right "
+                             "to dispute it with the background-check company (under the Fair Credit Reporting Act), and "
+                             "the employer must give you a copy of the report first. In the interview, stay calm: say "
+                             "briefly that you're disputing it, then talk about today. Your outreach team can help.", dispute)
+        # Offense detail and blame only count in sentences about the past, not in "since then" proof
+        # ("learned knife skills", "moved 2,000 pounds of freight").
+        past_text = " ".join(r["text"] for r in rows if not {"change", "pivot"} & set(r["moves"]))
+        blame = _any(BLAME, past_text)
         if blame:
             issue("blame", "This can sound like blaming others. Even if you feel it was unfair, the interview isn't the "
                            "place to argue the case — keep the focus on what you control.", blame)
-        minimize = _any(MINIMIZE, answer)
+        minimize = _any(MINIMIZE, past_text)
         if minimize:
             issue("minimize", "Avoid making it sound small. Employers hear minimizing as not taking it seriously; a "
                               "plain, honest description lands better.", minimize)
@@ -224,7 +260,7 @@ class RecordCoach:
         if agentless:
             issue("agentless", "Say it with “I”: “I made a bad decision” owns it; “mistakes were made” or “I got "
                                "caught up” pushes it away.", agentless)
-        overshare = _any(OVERSHARE, answer)
+        overshare = _any(OVERSHARE, past_text)
         if overshare:
             issue("overshare", "Too much detail about the offense or the court case. Name it in general terms (e.g. "
                                "“a drug-related offense”) and move on; details invite more questions.", overshare)
@@ -295,9 +331,11 @@ class RecordCoach:
                              "feedback": feedback,
                              "sentences": [rows[i]["text"] for i in present[key]]})
         penalty = {"blame": 12, "minimize": 8, "agentless": 6, "overshare": 10, "slang": 4, "hedge": 3,
-                   "short": 6, "long": 8, "balance": 6, "ending": 4, "order": 4}
+                   "short": 6, "long": 8, "dispute": 8, "balance": 6, "ending": 4, "order": 4}
         score = score * 100 / sum(ELEMENT_WEIGHTS[k] for k in needed)  # only the moves this question calls for
         score -= sum(penalty.get(i["kind"], 0) for i in issues)
+        if denial:
+            score = min(score, DENIAL_CAP)
         score = max(0, min(100, round(score)))
 
         result = {
@@ -357,22 +395,31 @@ class RecordCoach:
                     f"I earned my {c['name']}" + (f" in {c['date']}" if c.get("date") else "") + ".")
         for t in profile.get("training", []):
             if t.get("name"):
-                hours = f"{t['hours']}-hour " if str(t.get("hours", "")).isdigit() else ""
-                add(when(t, "date"), "Training", t["name"], f"I completed a {hours}{t['name']}.")
+                name, hours = t["name"], str(t.get("hours", "")).strip()
+                program = name.split()[-1].lower() in ("program", "programme", "course", "class", "training",
+                                                       "apprenticeship", "academy", "workshop", "bootcamp")
+                if program:  # "a 240-hour Pre-Apprenticeship Construction Program"
+                    lead = f"{hours}-hour " if hours.isdigit() else ""
+                    sentence = f"I completed {article(lead or name)} {lead}{name}."
+                else:  # "OSHA 10 (10 hours)", not "a 10-hour OSHA 10"
+                    sentence = f"I completed {name}" + (f" ({hours} hours)." if hours.isdigit() else ".")
+                add(when(t, "date", "end"), "Training", name, sentence)
         for e in profile.get("education", []):
-            if e.get("credential"):
-                add(when(e, "end"), "Education", e["credential"], f"I earned my {e['credential']}.")
+            if e.get("credential") or e.get("school"):
+                add(when(e, "end", "start"), "Education", e.get("credential") or e["school"],
+                    f"I earned my {e['credential']}." if e.get("credential") else f"I studied at {e['school']}.")
         for x in profile.get("experience", []):
             if x.get("title"):
                 current = str(x.get("end", "")).strip().lower() in ("present", "current", "now", "")
                 employer = x.get("employer", "")
                 where = f" at {employer}" if employer and not scan_sensitive(employer) else ""
-                sentence = (f"I work as a {x['title']}{where}." if current else f"I worked as a {x['title']}{where}.")
+                role = f"{article(x['title'])} {x['title']}"
+                sentence = (f"I work as {role}{where}." if current else f"I worked as {role}{where}.")
                 add(when(x, "end", "start"), "Work", x["title"] + where, sentence)
         for v in profile.get("volunteer", []):
             if v.get("role"):
                 org = v.get("organization", "")
                 add(when(v, "end", "start"), "Volunteer", v["role"],
-                    f"I volunteer as a {v['role']}" + (f" with {org}" if org and not scan_sensitive(org) else "") + ".")
+                    f"I volunteer as {article(v['role'])} {v['role']}" + (f" with {org}" if org and not scan_sensitive(org) else "") + ".")
         points.sort(key=lambda p: p[0], reverse=True)
         return [p for _, p in points[:6]]

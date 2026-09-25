@@ -38,6 +38,12 @@ class _BoardHandler(BaseHTTPRequestHandler):
         pass
 
 
+@pytest.fixture(autouse=True)
+def allow_local(monkeypatch):
+    # These tests talk to a server on 127.0.0.1, which real imports refuse (see test_private_addresses_*).
+    monkeypatch.setattr(jobs, "ALLOW_PRIVATE", True)
+
+
 @pytest.fixture()
 def board():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _BoardHandler)
@@ -163,3 +169,54 @@ def test_bridge_reports_blocked_code(tmp_path, board, monkeypatch):
     with pytest.raises(BridgeError) as err:
         service.call("job.fetch", {"url": board + "/always-blocked"})
     assert err.value.code == "fetch_blocked"
+
+
+def test_private_addresses_are_refused(monkeypatch):
+    monkeypatch.setattr(jobs, "ALLOW_PRIVATE", False)
+    for url in ("http://127.0.0.1:8080/job", "http://192.168.1.1/admin", "http://[::1]/x", "http://localhost/x",
+                "file:///etc/passwd"):
+        with pytest.raises(jobs.FetchError):
+            jobs.fetch_url(url)
+
+
+def test_redirect_into_private_network_is_refused(board, monkeypatch):
+    calls = []
+    real_open = jobs._open
+
+    class Redirect:
+        status_code, headers = 302, {"Location": "http://10.0.0.5/secret"}
+
+        def close(self):
+            pass
+
+    def fake_open(url, impersonate):
+        calls.append(url)
+        if "public" in url:
+            return Redirect()
+        return real_open(url, impersonate)
+
+    monkeypatch.setattr(jobs, "_open", fake_open)
+    monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: False)
+    monkeypatch.setattr(jobs, "check_public", lambda url: (_ for _ in ()).throw(jobs.FetchError("private"))
+                        if "10.0.0.5" in url else None)
+    with pytest.raises(jobs.FetchError, match="private"):
+        jobs.fetch_url("https://public.example.org/job")
+    assert calls == ["https://public.example.org/job"]  # the private hop is never requested
+
+
+def test_broken_download_is_a_fetch_error_not_internal(monkeypatch):
+    class Broken:
+        status_code, headers, url = 200, {"Content-Type": "text/html"}, "https://example.org/x"
+
+        def iter_content(self, size):
+            yield b"<html>"
+            raise ConnectionError("connection reset")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(jobs, "check_public", lambda url: None)
+    monkeypatch.setattr(jobs, "_has_curl_cffi", lambda: False)
+    monkeypatch.setattr(jobs, "_open", lambda url, impersonate: Broken())
+    with pytest.raises(jobs.FetchError, match="Lost the connection"):
+        jobs.fetch_url("https://example.org/x")

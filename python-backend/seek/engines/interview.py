@@ -17,9 +17,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..storage import Store, new_id, utc_now
+from ..storage import NotFound, Store, as_text, new_id, utc_now
 from .fair_chance import _scan as scan_sensitive
-from .nlp import NLP, STRONG_VERBS, stem
+from .nlp import NLP, STRONG_VERBS, needs_exact, stem
 
 _DATA = Path(__file__).resolve().parent.parent / "data"
 COLLECTION = "interview"
@@ -95,13 +95,14 @@ class InterviewEngine:
 
     def _question(self, question_id: str, custom_question: str = "") -> dict[str, Any]:
         if question_id == "custom" or (not question_id and custom_question):
+            custom_question = as_text(custom_question)
             if not custom_question.strip():
                 raise ValueError("Type the interview question to practise.")
             return {"id": "custom", "category": "Custom", "question": custom_question.strip(), "looking_for": "",
                     "keywords": [], "tip": ""}
         q = self._by_id.get(question_id)
         if q is None:
-            raise KeyError(f"question not found: {question_id}")
+            raise NotFound(f"question not found: {question_id}")
         return q
 
     # -- story ideas from the profile ------------------------------------------------------
@@ -109,7 +110,7 @@ class InterviewEngine:
         """Bullets from the participant's own profile that could anchor an answer."""
         profile = self.store.get("profiles", profile_id)
         if profile is None:
-            raise KeyError(f"profile not found: {profile_id}")
+            raise NotFound(f"profile not found: {profile_id}")
         q = self._question(question_id, custom_question)
         cue_stems = {stem(w) for kw in q["keywords"] for w in self.nlp.key(kw).split()}
         cue_stems |= {stem(w) for w in self.nlp.key(q["question"]).split() if len(w) > 3}
@@ -263,9 +264,10 @@ class InterviewEngine:
                 feedback.append("Name 1–3 specific skills this proves (e.g. teamwork, customer service, forklift, safety).")
                 score -= 25
             if job:
-                job_keys = {k["key"]: k["term"] for k in job.get("keywords", [])[:25]}
+                kws = job.get("keywords", [])[:25]
+                job_keys = {k["key"]: k["term"] for k in kws}
                 prof = self.nlp.profile_text(text)
-                hit = [term for key, term in job_keys.items() if self.nlp.covers(prof, key)]
+                hit = [k["term"] for k in kws if self.nlp.covers(prof, k["key"], strict=needs_exact(k))]
                 if hit:
                     good.append("Connects to the posting: " + ", ".join(hit[:4]) + ".")
                 else:
@@ -394,5 +396,5 @@ class InterviewEngine:
 
     def delete(self, record_id: str) -> dict[str, Any]:
         if not self.store.delete(COLLECTION, record_id):
-            raise KeyError(f"practice record not found: {record_id}")
+            raise NotFound(f"practice record not found: {record_id}")
         return {"deleted": record_id}

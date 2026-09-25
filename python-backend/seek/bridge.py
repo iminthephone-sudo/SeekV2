@@ -37,7 +37,7 @@ from .engines.writing import WritingAssist
 from .engines.search import SOURCES as SEARCH_SOURCES, SearchEngine
 from .engines.optimizer import OptimizerEngine
 from .engines.profiles import CONTACT_FIELDS, SECTION_FIELDS, TEMPLATES, ProfileEngine
-from .storage import Store
+from .storage import NotFound, Store, as_text
 
 JSON_PREFIX = "SEEK_JSON:"
 PROGRESS_PREFIX = "SEEK_PROGRESS:"
@@ -72,10 +72,12 @@ class SeekService:
         self.profiles = ProfileEngine(self.store)
         self.jobs = JobEngine(self.store, self.nlp)
         self.optimizer = OptimizerEngine(self.store, self.nlp, self.profiles)
-        self.letters = CoverLetterEngine(self.store, self.nlp, self.profiles)
         self.interview = InterviewEngine(self.store, self.nlp)
         self.record_coach = RecordCoach(self.store, self.nlp)
         self.writing = WritingAssist(self.store, self.nlp, self.profiles)
+        self.letters = CoverLetterEngine(
+            self.store, self.nlp, self.profiles,
+            rewrite=lambda text: self.writing.rewrite_bullet(text, past=True, placeholder=False)["rewrite"])
         self.search = SearchEngine(self.store)
         self.shutdown_requested = False
         self._progress: Callable[[int, str], None] = lambda pct, msg: None
@@ -104,7 +106,7 @@ class SeekService:
             "fairchance.guidance": lambda: fair_chance.GUIDANCE,
             "job.fetch": lambda url: self.jobs.fetch(url, self._progress),
             "job.from_html": self.jobs.from_html,
-            "job.page_url": lambda url: normalize_url(url.strip()),
+            "job.page_url": lambda url: normalize_url(as_text(url).strip()),
             "search.sources": lambda: SEARCH_SOURCES,
             "search.run": lambda query, location="", sources=None, page=0, fair_chance=False, direct=None:
                 self.search.search(query, location, sources, page, fair_chance, direct, self._progress),
@@ -201,7 +203,7 @@ class SeekService:
             raise
         except FetchError as exc:
             raise BridgeError("fetch_blocked" if exc.blocked else "fetch_failed", str(exc)) from exc
-        except KeyError as exc:
+        except NotFound as exc:
             raise BridgeError("not_found", str(exc.args[0]) if exc.args else "not found") from exc
         except (ValueError, TypeError) as exc:
             raise BridgeError("invalid", str(exc)) from exc

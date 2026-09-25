@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from ..storage import Store, new_id, utc_now
+from ..storage import NotFound, Store, as_text, new_id, utc_now
 
 COLLECTION = "profiles"
 
@@ -53,7 +53,7 @@ def blank_profile(name: str = "New profile", participant: str = "") -> dict[str,
 
 
 def _clean_text(value: Any) -> str:
-    return "" if value is None else str(value).strip()
+    return as_text(value).strip()
 
 
 def _clean_list(value: Any) -> list[str]:
@@ -111,7 +111,7 @@ class ProfileEngine:
     def _require(self, profile_id: str) -> dict[str, Any]:
         profile = self.store.get(COLLECTION, profile_id)
         if profile is None:
-            raise KeyError(f"profile not found: {profile_id}")
+            raise NotFound(f"profile not found: {profile_id}")
         return profile
 
     def list(self) -> list[dict[str, Any]]:

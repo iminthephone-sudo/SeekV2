@@ -30,10 +30,10 @@ SENSITIVE_TERMS: list[tuple[str, str]] = [
      "('residents', 'peers', 'learners')."),
     (r"\bincarcerat\w*\b|\bwhile (serving|locked up|inside)\b|\bmy sentence\b",
      "The resume doesn't need to explain where you were — list the job, training or program and what you did."),
-    (r"\b(felony|felonies|misdemeanou?rs?|convictions?|convicted|criminal record|arrests?)\b",
+    (r"\b(felony|felonies|misdemeanou?rs?|convictions?|convicted|criminal record|(?<!cardiac )(?<!respiratory )arrests?)\b",
      "Legal history doesn't belong on a resume. Answer application questions honestly when asked; your "
      "caseworker can help you prepare a short, forward-looking explanation for interviews."),
-    (r"\b(parole|probation)( officer)?\b",
+    (r"\b(parole|probation(?!ary| period))( officer)?\b",
      "Supervision status isn't resume content. If it affects scheduling, discuss it with the employer after an "
      "offer or when asked."),
     (r"\bhalfway house\b|\bwork[- ]release\b|\breentry (center|facility)\b",
@@ -77,21 +77,41 @@ _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
 
 
+_SEASONS = {"spring": (3, 5), "summer": (6, 8), "fall": (9, 11), "autumn": (9, 11), "winter": (1, 2)}
+
+
+def _year(value: str) -> int | None:
+    y = int(value)
+    return y if 1900 <= y <= 2100 else None
+
+
 def parse_when(text: str, *, is_end: bool = False) -> date | None:
-    """Parse the loose dates people type: '2019', 'Jan 2019', '01/2019', 'Present'."""
+    """Parse the loose dates people type: '2019', 'Jan 2019', '01/2019', '2019-05', 'Summer 2020',
+    '2019-2021' (a range: the start or end year, depending on ``is_end``), 'Present'."""
     t = (text or "").strip().lower()
     if not t:
         return None
-    if t in {"present", "current", "now", "today", "ongoing"}:
+    if re.match(r"(present|current|now|today|ongoing)\b", t):  # also "Present (part-time)"
         return date.today()
-    m = re.search(r"(\d{1,2})\s*[/-]\s*(\d{4})", t)
+    m = re.search(r"\b(\d{4})\s*[-–—/]\s*(\d{4})\b", t)  # "2019-2021" is two years, not month 19
     if m:
-        return date(int(m.group(2)), max(1, min(12, int(m.group(1)))), 1)
-    m = re.search(r"([a-z]{3})[a-z]*\.?\s+(\d{4})", t)
-    if m and m.group(1) in _MONTHS:
+        y = _year(m.group(2) if is_end else m.group(1))
+        return date(y, 12 if is_end else 1, 1) if y else None
+    m = re.search(r"\b(\d{4})\s*[-/.]\s*(\d{1,2})\b", t)  # ISO-ish "2019-05"
+    if m and 1 <= int(m.group(2)) <= 12 and _year(m.group(1)):
+        return date(int(m.group(1)), int(m.group(2)), 1)
+    m = re.search(r"\b(\d{1,2})\s*[/-]\s*(\d{4})\b", t)
+    if m and 1 <= int(m.group(1)) <= 12 and _year(m.group(2)):
+        return date(int(m.group(2)), int(m.group(1)), 1)
+    m = re.search(r"([a-z]{3})[a-z]*\.?,?\s+(\d{4})", t)
+    if m and m.group(1) in _MONTHS and _year(m.group(2)):
         return date(int(m.group(2)), _MONTHS[m.group(1)], 1)
-    m = re.search(r"(\d{4})", t)
-    if m:
+    m = re.search(r"\b(spring|summer|fall|autumn|winter)\b\s*,?\s*(\d{4})", t)
+    if m and _year(m.group(2)):
+        first, last = _SEASONS[m.group(1)]
+        return date(int(m.group(2)), last if is_end else first, 1)
+    m = re.search(r"\b(\d{4})\b", t)
+    if m and _year(m.group(1)):
         return date(int(m.group(1)), 12 if is_end else 1, 1)
     return None
 
@@ -164,7 +184,8 @@ def find_gaps(profile: dict[str, Any], gap_months: int = 9) -> list[dict[str, An
     for section, name_key in (("experience", "title"), ("volunteer", "role"), ("education", "credential"),
                               ("training", "name")):
         for entry in profile.get(section, []):
-            start_raw = entry.get("start") or entry.get("date")
+            # Education often has only a completion date: count it as that one month.
+            start_raw = entry.get("start") or entry.get("date") or entry.get("end")
             start = parse_when(start_raw)
             end = parse_when(entry.get("end") or start_raw or "", is_end=True)
             if start and end and end >= start:
@@ -174,8 +195,9 @@ def find_gaps(profile: dict[str, Any], gap_months: int = 9) -> list[dict[str, An
     covered_until = None
     last_label = ""
     for start, end, label in spans:
-        if covered_until and _months_between(covered_until, start) > gap_months:
-            months = _months_between(covered_until, start)
+        # Months with no activity in between: a job ending in Jan and the next starting in Feb is no gap.
+        if covered_until and _months_between(covered_until, start) - 1 > gap_months:
+            months = _months_between(covered_until, start) - 1
             gaps.append({
                 "from": covered_until.strftime("%b %Y"), "to": start.strftime("%b %Y"), "months": months,
                 "after": last_label, "before": label,

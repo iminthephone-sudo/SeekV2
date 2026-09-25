@@ -12,8 +12,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from ..storage import Store, utc_now
-from .nlp import NLP
+from ..storage import NotFound, Store, as_list, utc_now
+from .nlp import NLP, needs_exact
 from .profiles import ProfileEngine, profile_text
 
 TOP_KEYWORDS = 25
@@ -36,7 +36,7 @@ def match(profile: dict[str, Any], job: dict[str, Any], nlp: NLP) -> dict[str, A
     for kw in keywords:
         w = _weight(kw)
         total += w
-        covered = nlp.covers(prof, kw["key"])
+        covered = nlp.covers(prof, kw["key"], strict=needs_exact(kw))
         if kw.get("required"):
             req_total += 1
             req_got += covered
@@ -171,7 +171,7 @@ class OptimizerEngine:
     def _job(self, job_id: str) -> dict[str, Any]:
         job = self.store.get("jobs", job_id)
         if job is None:
-            raise KeyError(f"job not found: {job_id}")
+            raise NotFound(f"job not found: {job_id}")
         return job
 
     def match(self, profile_id: str, job_id: str) -> dict[str, Any]:
@@ -186,7 +186,8 @@ class OptimizerEngine:
               headline: str | None = None, reorder: bool = True, as_copy: bool = True) -> dict[str, Any]:
         profile = self.profiles.get(profile_id)
         job = self._job(job_id)
-        tailored = tailor(profile, job, self.nlp, add_skills, headline, reorder)
+        tailored = tailor(profile, job, self.nlp, as_list(add_skills), headline, reorder)
+        tailored.pop("accounts", None)  # a copy has its own (empty) browser storage; an update keeps the original's
         if as_copy:
             label = " ".join(filter(None, [job.get("company"), job.get("title")]))[:60] or "tailored"
             tailored.pop("id", None)

@@ -19,7 +19,7 @@ import re
 from typing import Any, Callable
 from urllib.parse import urlencode, urljoin
 
-from ..storage import Store
+from ..storage import Store, as_list
 from .jobs import FetchError, fetch_url, linkedin_job_id, normalize_url
 
 SOURCES = {
@@ -86,9 +86,14 @@ def _indeed_json(page: str) -> list[dict[str, Any]]:
         data, _ = json.JSONDecoder().raw_decode(page, m.end())
     except json.JSONDecodeError:
         return []
-    results = (((data.get("metaData") or {}).get("mosaicProviderJobCardsModel") or {}).get("results") or [])
+    try:
+        results = data["metaData"]["mosaicProviderJobCardsModel"]["results"]
+    except (KeyError, TypeError):
+        return []  # a different shape: fall back to the rendered cards
     out = []
-    for r in results:
+    for r in results if isinstance(results, list) else []:
+        if not isinstance(r, dict):
+            continue
         jk = str(r.get("jobkey", ""))
         if not re.fullmatch(r"[0-9a-f]{16}", jk):
             continue
@@ -164,8 +169,8 @@ class SearchEngine:
         location = re.sub(r"\s+", " ", location or "").strip()[:MAX_QUERY]
         if not query:
             raise ValueError("Type what kind of job to search for, e.g. “warehouse” or “line cook”.")
-        sources = [s for s in (sources or list(SOURCES)) if s in SOURCES] or list(SOURCES)
-        direct = list(SOURCES) if direct is None else [s for s in direct if s in SOURCES]
+        sources = [s for s in as_list(sources) if s in SOURCES] or list(SOURCES)
+        direct = list(SOURCES) if direct is None else [s for s in as_list(direct) if s in SOURCES]
         page = max(0, min(int(page or 0), 20))
         results: list[dict[str, Any]] = []
         browser: list[dict[str, str]] = []

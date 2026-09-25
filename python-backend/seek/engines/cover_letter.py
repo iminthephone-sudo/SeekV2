@@ -12,9 +12,9 @@ from __future__ import annotations
 import re
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from ..storage import Store, new_id, utc_now
+from ..storage import NotFound, Store, as_text, new_id, utc_now
 from .nlp import NLP
 from .optimizer import match as match_profile
 from .profiles import ProfileEngine
@@ -62,7 +62,8 @@ def _skill_phrase(term: str) -> str:
 
 def compose(profile: dict[str, Any], job: dict[str, Any] | None, nlp: NLP, tone: str = "professional",
             hiring_manager: str = "", availability: str = "right away", fair_chance_line: bool | None = None,
-            personal_note: str = "") -> dict[str, Any]:
+            personal_note: str = "", rewrite: Callable[[str], str] | None = None) -> dict[str, Any]:
+    """``rewrite``: turns a resume bullet into a clean past-tense action ("Responsible for scanning" -> "Scanned")."""
     tone = tone if tone in TONES else "professional"
     job = job or {}
     c = profile.get("contact", {})
@@ -100,6 +101,14 @@ def compose(profile: dict[str, Any], job: dict[str, Any] | None, nlp: NLP, tone:
         entry = entries.get(b.get("entry_id"))
         if not entry or len(evidence) >= 3:
             continue
+        text = b.get("text", "")
+        if "[#]" in text:
+            continue  # a writing-help prompt that was never filled in doesn't belong in a letter
+        if rewrite:
+            text = rewrite(text) or text
+        if not nlp.review_bullet(text)["starts_with_verb"]:
+            continue  # "I responsible for…": only bullets that start with an action read as a sentence
+        b = {**b, "text": text}
         org = entry.get("employer") or entry.get("organization") or ""
         role = entry.get("title") or entry.get("role") or ""
         if b.get("entry_id") in used_entries:
@@ -188,18 +197,21 @@ def _article(word: str) -> str:
 
 
 class CoverLetterEngine:
-    def __init__(self, store: Store, nlp: NLP, profiles: ProfileEngine) -> None:
+    def __init__(self, store: Store, nlp: NLP, profiles: ProfileEngine,
+                 rewrite: Callable[[str], str] | None = None) -> None:
         self.store = store
         self.nlp = nlp
         self.profiles = profiles
+        self.rewrite = rewrite
 
     def generate(self, profile_id: str, job_id: str = "", save: bool = True, **options: Any) -> dict[str, Any]:
         profile = self.profiles.get(profile_id)
         job = self.store.get("jobs", job_id) if job_id else None
         if job_id and job is None:
-            raise KeyError(f"job not found: {job_id}")
+            raise NotFound(f"job not found: {job_id}")
         allowed = {"tone", "hiring_manager", "availability", "fair_chance_line", "personal_note"}
-        result = compose(profile, job, self.nlp, **{k: v for k, v in options.items() if k in allowed})
+        result = compose(profile, job, self.nlp, rewrite=self.rewrite,
+                         **{k: v for k, v in options.items() if k in allowed})
         if save:
             letter = {
                 "id": new_id("ltr"), "profile_id": profile_id, "job_id": job_id or "",
@@ -214,7 +226,7 @@ class CoverLetterEngine:
 
     def save(self, letter_id: str, text: str, title: str = "") -> dict[str, Any]:
         letter = self.get(letter_id)
-        letter["text"] = text
+        letter["text"] = as_text(text)
         if title:
             letter["title"] = title
         letter["updated_at"] = utc_now()
@@ -223,7 +235,7 @@ class CoverLetterEngine:
     def get(self, letter_id: str) -> dict[str, Any]:
         letter = self.store.get(COLLECTION, letter_id)
         if letter is None:
-            raise KeyError(f"letter not found: {letter_id}")
+            raise NotFound(f"letter not found: {letter_id}")
         return letter
 
     def list(self, profile_id: str = "") -> list[dict[str, Any]]:

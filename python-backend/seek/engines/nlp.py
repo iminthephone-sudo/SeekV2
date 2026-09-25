@@ -92,6 +92,29 @@ class Keyword:
         }
 
 
+def article(phrase: str) -> str:
+    """ "a" or "an" for a phrase, by sound: "an RF scanner", "a CDL", "an OSHA card", "an hour", "a uniform"."""
+    word = (phrase or "").strip().split(" ")[0].strip("\"'(")
+    if not word:
+        return "a"
+    lw = word.lower()
+    if word.isupper() and len(word) > 1 and not re.search(r"[AEIOU]", word[1:]):
+        return "an" if word[0] in "AEFHILMNORSX" else "a"  # spelled out: "an R-F", "a C-D-L"
+    if lw.startswith(("hour", "honest", "honor", "honour", "heir")):
+        return "an"
+    if lw.startswith(("uni", "use", "usu", "uti", "eu", "one", "once", "ur")):
+        return "a"
+    return "an" if lw[0] in "aeiou" else "a"
+
+
+def straight_quotes(text: str) -> str:
+    """Curly quotes (Word, phones) -> straight, so "I’d" matches the same patterns as "I'd"."""
+    return text.translate(_QUOTES)
+
+
+_QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201c": '"', "\u201d": '"', "\u02bc": "'"})
+
+
 def stem(word: str) -> str:
     """Crude suffix stem, a safety net for words the tagger leaves unlemmatised ("unloaded" as ADJ)."""
     for suffix in ("ing", "ed", "es", "s"):
@@ -286,9 +309,13 @@ class NLP:
                 prof.phrases.add(self.key(phrase))
         return prof
 
-    def covers(self, prof: TextProfile, keyword_key: str) -> bool:
+    def covers(self, prof: TextProfile, keyword_key: str, strict: bool = False) -> bool:
+        """Does the text cover a keyword? ``strict`` requires the phrase itself (credentials, multi-word
+        skills): "forklift" in one bullet plus "certification" in another is not a forklift certification."""
         if keyword_key in prof.phrases or keyword_key in prof.skills:
             return True
+        if strict:
+            return False
         words = [w for w in keyword_key.split() if w not in BOILERPLATE]
         return bool(words) and all(w in prof.lemmas or stem(w) in prof.stems for w in words)
 
@@ -332,6 +359,16 @@ class NLP:
             "text": clean, "starts_with_verb": starts_with_verb, "has_number": has_number,
             "words": words, "issues": issues, "score": max(score, 0),
         }
+
+
+CREDENTIAL = re.compile(r"certif|licen[cs]|\bcard\b|\bcdl\b|permit|registration|degree|diploma|\bged\b|endorse",
+                        re.I)
+
+
+def needs_exact(keyword: dict) -> bool:
+    """Keywords that must appear as a phrase to count as covered: credentials and multi-word skills."""
+    key = keyword.get("key", "")
+    return bool(CREDENTIAL.search(key)) or (keyword.get("kind") == "skill" and len(key.split()) > 1)
 
 
 _INSTANCE: NLP | None = None

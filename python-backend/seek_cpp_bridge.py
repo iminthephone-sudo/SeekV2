@@ -40,7 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     # Protocol stream: keep the real stdout for packets, send everything else to stderr.
     protocol = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="\n", line_buffering=True)
     sys.stdout = sys.stderr
-    stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
+    # One bad byte must not end the engine (and drop the requests queued behind it): it becomes U+FFFD and that
+    # line fails as bad JSON on its own.
+    stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
 
     if args.data_dir:
         os.environ["SEEK_DATA_DIR"] = args.data_dir

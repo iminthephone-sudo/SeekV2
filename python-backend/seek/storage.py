@@ -19,7 +19,37 @@ from pathlib import Path
 from typing import Any, Iterator
 
 _LOCK = threading.RLock()
-_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")  # used with fullmatch: "$" would accept a trailing newline
+# Windows maps these names to devices whatever the extension ("CON.json" is the console).
+_RESERVED = re.compile(r"(con|prn|aux|nul|com[0-9]|lpt[0-9])", re.I)
+
+
+class NotFound(KeyError):
+    """A record the caller asked for doesn't exist (the bridge reports it as ``not_found``)."""
+
+
+def safe_id(value: str) -> bool:
+    return bool(_SAFE_ID.fullmatch(value or "")) and not _RESERVED.fullmatch(value)
+
+
+def as_list(value: Any) -> list[str]:
+    """A list-of-strings parameter from the shell. A lone string is one item, not a list of letters."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if v is not None and str(v).strip()]
+    raise ValueError("expected a list of strings")
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def as_text(value: Any) -> str:
+    """A text parameter from the shell; None means empty. Control characters pasted from Word or PowerPoint
+    (e.g. \\x0b soft line breaks) become spaces: they are invisible, and .docx export refuses them."""
+    return "" if value is None else _CONTROL.sub(" ", str(value))
 
 
 def utc_now() -> str:
@@ -53,7 +83,7 @@ class Store:
 
     # -- paths ---------------------------------------------------------------
     def _collection_dir(self, collection: str) -> Path:
-        if not _SAFE_ID.match(collection):
+        if not safe_id(collection):
             raise ValueError(f"invalid collection name: {collection!r}")
         path = self.root / collection
         path.mkdir(parents=True, exist_ok=True)
@@ -61,7 +91,7 @@ class Store:
 
     def _doc_path(self, collection: str, doc_id: str) -> Path:
         # Ids come from the shell; never let one escape the collection folder.
-        if not _SAFE_ID.match(doc_id or ""):
+        if not safe_id(doc_id or ""):
             raise ValueError(f"invalid id: {doc_id!r}")
         return self._collection_dir(collection) / f"{doc_id}.json"
 
@@ -70,16 +100,23 @@ class Store:
         path = self._doc_path(collection, doc_id)
         if not path.exists():
             return None
-        with path.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"The saved {collection} record {doc_id} is damaged and can't be read.") from exc
+        return doc if isinstance(doc, dict) else None
 
     def put(self, collection: str, doc_id: str, doc: dict[str, Any]) -> dict[str, Any]:
         path = self._doc_path(collection, doc_id)
         with _LOCK:
-            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".json")
+            # ".tmp" (not ".json"), so a file left by a crash is never read back as a record.
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-", suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(doc, fh, indent=2, ensure_ascii=False)
+                    fh.flush()
+                    os.fsync(fh.fileno())  # the rename must never publish an empty file after a power loss
                 os.replace(tmp, path)
             except BaseException:
                 Path(tmp).unlink(missing_ok=True)
@@ -96,11 +133,22 @@ class Store:
 
     def all(self, collection: str) -> Iterator[dict[str, Any]]:
         for path in sorted(self._collection_dir(collection).glob("*.json")):
+            if path.name.startswith("."):  # temp files from older versions
+                continue
             try:
                 with path.open("r", encoding="utf-8") as fh:
-                    yield json.load(fh)
+                    doc = json.load(fh)
             except (OSError, json.JSONDecodeError) as exc:
                 print(f"[storage] skipping unreadable {path.name}: {exc}", file=sys.stderr)
+                continue
+            if not isinstance(doc, dict):
+                print(f"[storage] skipping {path.name}: not a record", file=sys.stderr)
+                continue
+            doc.setdefault("id", path.stem)  # the file name is the id
+            if doc["id"] != path.stem:
+                print(f"[storage] skipping {path.name}: id doesn't match the file name", file=sys.stderr)
+                continue
+            yield doc
 
     # -- settings (single document) -----------------------------------------
     def settings(self) -> dict[str, Any]:

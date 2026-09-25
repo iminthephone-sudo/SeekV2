@@ -11,12 +11,16 @@ page goes through exactly the same pipeline.
 from __future__ import annotations
 
 import html as html_lib
+import ipaddress
 import json
+import os
 import re
+import socket
+import time
 from typing import Any, Callable
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
-from ..storage import Store, new_id, utc_now
+from ..storage import NotFound, Store, as_text, new_id, utc_now
 from .nlp import NLP, stem
 
 COLLECTION = "jobs"
@@ -41,6 +45,13 @@ BROWSER_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 BLOCKED_STATUSES = (401, 403, 429, 999)
+REDIRECTS = (301, 302, 303, 307, 308)
+MAX_REDIRECTS = 5
+DEADLINE_SECONDS = 30
+MAX_TEXT = 200_000  # characters of description; a real posting is a few thousand  # a whole download; a server trickling bytes must not stall the engine
+# Imports only reach the public internet: a posting link that points (or redirects) into the office network,
+# a router or this computer is refused. Tests and local development can allow it explicitly.
+ALLOW_PRIVATE = os.environ.get("SEEK_ALLOW_LOCAL_FETCH") == "1"
 # Elements some boards put the description in; checked before the generic "densest block" guess.
 DESCRIPTION_SELECTORS = ("#jobDescriptionText",               # Indeed
                          ".show-more-less-html__markup",      # LinkedIn (guest page)
@@ -73,6 +84,10 @@ SIGNALS = {
 # Hiring-policy words describe the employer, not a skill to put on a resume.
 POLICY_TERMS = (r"\b(criminal|record|records|conviction|felony|applicants?|employer|equal opportunity|eeo|"
                 r"background|drug|e-verify|accommodation|disabilit(y|ies)|veteran|benefits?|401k|pto)\b")
+# "Pursuant to the San Francisco Fair Chance Ordinance…" is legal boilerplate every covered employer must print;
+# it doesn't mean the employer calls itself fair-chance.
+FAIR_CHANCE_LAW = re.compile(r"(pursuant to|in accordance with|consistent with|as required by|compl(y|ies|iance) with|"
+                             r"under)\b[^.]{0,80}$|ordinance|\bact\b|\blaw\b|\bstatute\b", re.I)
 EXCLUSION_PATTERNS = r"no (felon(y|ies)|convictions?|criminal record)|must not have (a|any) (felony|conviction)"
 
 
@@ -84,6 +99,11 @@ class FetchError(RuntimeError):
         self.blocked = blocked
 
 
+def _host(parsed) -> str:
+    """Host name without port or case: "WWW.LinkedIn.com:443" -> "www.linkedin.com"."""
+    return (parsed.hostname or "").lower()
+
+
 def normalize_url(url: str) -> str:
     """Rewrite links that wrap a posting into the posting's own page.
 
@@ -91,12 +111,13 @@ def normalize_url(url: str) -> str:
     redirect pages; ``/viewjob?jk=`` is the posting itself. Links without a job key are left alone.
     """
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
+    host = _host(parsed)
     if host == "indeed.com" or host.endswith(".indeed.com"):
         query = parse_qs(parsed.query)
         jk = (query.get("jk") or query.get("vjk") or [""])[0]
         if re.fullmatch(r"[0-9a-f]{16}", jk):
-            return f"https://{parsed.netloc}/viewjob?jk={jk}"
+            host = "www.indeed.com" if host in ("indeed.com", "m.indeed.com") else host
+            return f"https://{host}/viewjob?jk={jk}"
     job_id = linkedin_job_id(url)
     if job_id:
         return f"https://www.linkedin.com/jobs/view/{job_id}/"
@@ -106,7 +127,7 @@ def normalize_url(url: str) -> str:
 def linkedin_job_id(url: str) -> str:
     """The numeric posting id from any LinkedIn job link (view page, search page, guest API), or ""."""
     parsed = urlparse(url)
-    host = parsed.netloc.lower()
+    host = _host(parsed)
     if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
         return ""
     current = parse_qs(parsed.query).get("currentJobId", [""])[0]
@@ -175,13 +196,21 @@ def _find_jobposting(node: Any) -> dict | None:
     return None
 
 
+def _s(value: Any) -> str:
+    """A JSON-LD value as text: null -> "", ["Austin"] -> "Austin", {"name": …} -> its name."""
+    value = _first(value)
+    if isinstance(value, dict):
+        value = value.get("name") or value.get("value") or ""
+    return html_lib.unescape("" if value is None else str(value)).strip()
+
+
 def _location(jp: dict) -> str:
     loc = _first(jp.get("jobLocation"))
     if isinstance(loc, dict):
         addr = loc.get("address") or {}
         if isinstance(addr, dict):
-            return ", ".join(filter(None, [addr.get("addressLocality"), addr.get("addressRegion")]))
-        return str(addr)
+            return ", ".join(filter(None, [_s(addr.get("addressLocality")), _s(addr.get("addressRegion"))]))
+        return _s(addr)
     if jp.get("jobLocationType") == "TELECOMMUTE":
         return "Remote"
     return ""
@@ -213,17 +242,18 @@ def parse_html(page: str, url: str = "") -> dict[str, Any]:
                 continue
         jp = _find_jobposting(data)
         if jp:
-            org = jp.get("hiringOrganization")
-            company = org.get("name", "") if isinstance(org, dict) else str(org or "")
-            emp_type = jp.get("employmentType", "")
+            emp_type = jp.get("employmentType") or ""
+            description = "" if jp.get("description") is None else str(jp.get("description"))
+            if "&lt;" in description and "<" not in description:
+                description = html_lib.unescape(description)  # some boards entity-escape the HTML twice
             return {
-                "title": html_lib.unescape(str(jp.get("title", ""))).strip(),
-                "company": html_lib.unescape(company).strip(),
+                "title": _s(jp.get("title")),
+                "company": _s(jp.get("hiringOrganization")),
                 "location": _location(jp),
-                "employment_type": ", ".join(emp_type) if isinstance(emp_type, list) else str(emp_type),
+                "employment_type": ", ".join(_s(e) for e in emp_type) if isinstance(emp_type, list) else _s(emp_type),
                 "salary": _salary(jp),
-                "date_posted": str(jp.get("datePosted", "")),
-                "description": _text_from_html(str(jp.get("description", ""))),
+                "date_posted": _s(jp.get("datePosted")),
+                "description": _text_from_html(description),
                 "source": "json-ld",
             }
 
@@ -291,9 +321,22 @@ def _open(url: str, impersonate: bool) -> Any:
         # Most job-board 403s aren't about headers at all: the WAF fingerprints the TLS/HTTP2
         # handshake, and Python's ssl module is on every blocklist. curl_cffi replays Chrome's
         # handshake (and sends Chrome's own headers), so the request is indistinguishable from a browser.
-        return curl_requests.get(url, impersonate="chrome", timeout=20, stream=True, allow_redirects=True)
+        return curl_requests.get(url, impersonate="chrome", timeout=20, stream=True, allow_redirects=False)
     import requests
-    return requests.get(url, headers=BROWSER_HEADERS, timeout=20, stream=True, allow_redirects=True)
+    return requests.get(url, headers=BROWSER_HEADERS, timeout=20, stream=True, allow_redirects=False)
+
+
+def _open_following(url: str, impersonate: bool) -> Any:
+    """GET with redirects followed by hand, so every hop is checked against private addresses."""
+    for _ in range(MAX_REDIRECTS + 1):
+        resp = _open(url, impersonate)
+        location = resp.headers.get("Location") if resp.status_code in REDIRECTS else None
+        if not location:
+            return resp
+        resp.close()
+        url = urljoin(url, location)
+        check_public(url)
+    raise FetchError("The link redirects too many times. Open it in a browser and copy the final address.")
 
 
 def _decode(body: bytes, content_type: str) -> str:
@@ -307,11 +350,28 @@ def _decode(body: bytes, content_type: str) -> str:
         return body.decode("utf-8", errors="replace")
 
 
+def check_public(url: str) -> None:
+    """Refuse links into private networks, this computer, or anything that isn't http(s)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise FetchError("Enter a full web address starting with http:// or https://")
+    if ALLOW_PRIVATE:
+        return
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except (socket.gaierror, UnicodeError, ValueError) as exc:
+        raise FetchError(f"Couldn't find {parsed.hostname}. Check the link and the internet connection.") from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if not ip.is_global:
+            raise FetchError(f"{parsed.hostname} is on a private network or this computer, so SEEK won't import "
+                             "from it. Paste the description instead.")
+
+
 def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> tuple[str, str]:
     url = url.strip()  # callers normalize first (JobEngine.fetch); this downloads exactly what it's given
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise FetchError("Enter a full web address starting with http:// or https://")
+    check_public(url)
     try:
         import requests  # noqa: F401
     except ImportError as exc:  # pragma: no cover
@@ -320,10 +380,13 @@ def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> t
     attempts = [True, False] if _has_curl_cffi() else [False]
     if progress:
         progress(15, f"Contacting {parsed.netloc}…")
+    deadline = time.monotonic() + DEADLINE_SECONDS
     resp, failure = None, None
     for impersonate in attempts:
         try:
-            candidate = _open(url, impersonate)
+            candidate = _open_following(url, impersonate)
+        except FetchError:
+            raise
         except OSError as exc:  # requests' and curl_cffi's exceptions both derive from OSError
             failure = exc
             continue
@@ -347,11 +410,20 @@ def fetch_url(url: str, progress: Callable[[int, str], None] | None = None) -> t
         if progress:
             progress(40, "Downloading posting…")
         chunks, size = [], 0
-        for chunk in resp.iter_content(None):  # None = as received; curl_cffi ignores sizes anyway
-            size += len(chunk)
-            if size > MAX_BYTES:
-                raise FetchError("That page is unusually large; paste the description instead.")
-            chunks.append(chunk)
+        try:
+            for chunk in resp.iter_content(None):  # None = as received; curl_cffi ignores sizes anyway
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise FetchError("That page is unusually large; paste the description instead.")
+                if time.monotonic() > deadline:
+                    raise FetchError(f"{parsed.hostname} is taking too long to send the page. Try again, or paste "
+                                     "the description instead.")
+                chunks.append(chunk)
+        except FetchError:
+            raise
+        except Exception as exc:  # broken chunking, truncated body, read timeout: all "the download failed"
+            raise FetchError(f"Lost the connection to {parsed.hostname} while downloading ({exc.__class__.__name__}). "
+                             "Try again, or paste the description instead.") from exc
         page = _decode(b"".join(chunks), resp.headers.get("Content-Type", ""))
         return page, str(resp.url)
     finally:
@@ -392,6 +464,12 @@ def clean_title(title: str, company: str = "") -> str:
 
 def detect_signals(text: str) -> dict[str, Any]:
     found = {name: bool(re.search(pattern, text, re.I)) for name, pattern in SIGNALS.items()}
+    # Fair-chance language only counts when the employer says it, not when a law makes them print it.
+    fc_hits = [m for m in re.finditer(SIGNALS["fair_chance"], text, re.I)]
+    legal = [m for m in fc_hits if FAIR_CHANCE_LAW.search(text[max(0, m.start() - 100):m.start()])
+             or re.match(r"\s*(ordinance|act|law)\b", text[m.end():m.end() + 12], re.I)]
+    found["fair_chance"] = len(fc_hits) > len(legal)
+    found["fair_chance_law"] = bool(legal)
     found["exclusions"] = [m.group(0) for m in re.finditer(EXCLUSION_PATTERNS, text, re.I)]
     return found
 
@@ -402,7 +480,9 @@ class JobEngine:
         self.nlp = nlp
 
     def _build(self, raw: dict[str, Any], url: str = "") -> dict[str, Any]:
-        text = raw.get("description", "")
+        text = as_text(raw.get("description"))
+        if len(text) > MAX_TEXT:
+            raise ValueError(f"That description is over {MAX_TEXT // 1000:,}k characters — paste only the job posting.")
         if len(text.split()) < 25:
             raise FetchError("Couldn't find a job description on that page. Paste the description instead.")
         title = clean_title(raw.get("title", ""), raw.get("company", ""))
@@ -448,7 +528,9 @@ class JobEngine:
             if kw.kind != "skill" and words and (words <= company_words or words <= title_words
                                                  or words <= company_words | title_words):
                 continue
-            if any(re.search(p, kw.term, re.I) for p in SIGNALS.values()) or re.search(POLICY_TERMS, kw.term, re.I):
+            if any(re.search(p, kw.term, re.I) for p in SIGNALS.values()):
+                continue
+            if kw.kind != "skill" and re.search(POLICY_TERMS, kw.term, re.I):  # "record keeping" is a real skill
                 continue
             out.append(kw.to_dict())
         return out[:40]
@@ -490,7 +572,7 @@ class JobEngine:
     def get(self, job_id: str) -> dict[str, Any]:
         job = self.store.get(COLLECTION, job_id)
         if job is None:
-            raise KeyError(f"job not found: {job_id}")
+            raise NotFound(f"job not found: {job_id}")
         return job
 
     def update(self, job_id: str, changes: dict[str, Any]) -> dict[str, Any]:
@@ -505,8 +587,8 @@ class JobEngine:
             if status != job.get("status"):
                 self.store.append_history("job", f"'{job['title']}' moved to {status}", job_id=job_id, status=status)
             job["status"] = status
-        if "description" in changes and changes["description"] != job.get("description"):
-            job["description"] = _tidy(changes["description"])
+        if "description" in changes and as_text(changes["description"]) != job.get("description"):
+            job["description"] = _tidy(as_text(changes["description"]))
             job["sections"] = split_sections(job["description"])
             job["keywords"] = self._keywords(job["description"], job.get("company", ""), job.get("title", ""))
             job["signals"] = detect_signals(job["description"])
