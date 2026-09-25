@@ -1,0 +1,45 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+  <file>icons/arrow-down.svg</file>
+  <file>icons/arrow-repeat.svg</file>
+  <file>icons/arrow-up.svg</file>
+  <file>icons/box-arrow-up-right.svg</file>
+  <file>icons/briefcase.svg</file>
+  <file>icons/bullseye.svg</file>
+  <file>icons/check-circle.svg</file>
+  <file>icons/chat-quote.svg</file>
+  <file>icons/check2.svg</file>
+  <file>icons/check2-white.svg</file>
+  <file>icons/chevron-down.svg</file>
+  <file>icons/clipboard.svg</file>
+  <file>icons/clock-history.svg</file>
+  <file>icons/copy.svg</file>
+  <file>icons/dash-lg.svg</file>
+  <file>icons/download.svg</file>
+  <file>icons/envelope-paper.svg</file>
+  <file>icons/exclamation-triangle.svg</file>
+  <file>icons/file-earmark-person.svg</file>
+  <file>icons/filetype-pdf.svg</file>
+  <file>icons/fullscreen.svg</file>
+  <file>icons/gear.svg</file>
+  <file>icons/house.svg</file>
+  <file>icons/info-circle.svg</file>
+  <file>icons/journal.svg</file>
+  <file>icons/link.svg</file>
+  <file>icons/list.svg</file>
+  <file>icons/magic.svg</file>
+  <file>icons/moon.svg</file>
+  <file>icons/pencil.svg</file>
+  <file>icons/people.svg</file>
+  <file>icons/person-vcard.svg</file>
+  <file>icons/plus-lg.svg</file>
+  <file>icons/save.svg</file>
+  <file>icons/search.svg</file>
+  <file>icons/shield-check.svg</file>
+  <file>icons/square.svg</file>
+  <file>icons/stars.svg</file>
+  <file>icons/sun.svg</file>
+  <file>icons/trash.svg</file>
+  <file>icons/x-lg.svg</file>
+</qresource>
+</RCC>

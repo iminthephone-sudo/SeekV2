@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+python-backend/.venv/
+.venv/
+
+# C++ / Qt build output
+build/
+shell/build/
+*.user
+CMakeLists.txt.user
