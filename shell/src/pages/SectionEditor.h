@@ -8,6 +8,7 @@
 #include <QWidget>
 
 class QFormLayout;
+class QHBoxLayout;
 class QListWidget;
 class QPushButton;
 
@@ -27,6 +28,12 @@ public:
     void setEntries(const QJsonArray& entries);
     QJsonArray entries() const { return m_entries; }
     void selectEntryById(const QString& id);
+    // The entry being edited (empty when none is selected).
+    QJsonObject currentEntry() const;
+    // Replace one field of the current entry, updating the form, and emit changed().
+    void setCurrentField(const QString& key, const QJsonValue& value);
+    // A row under a multiline field where pages can add helper buttons (e.g. writing help).
+    QHBoxLayout* fieldTools(const QString& key) const { return m_tools.value(key); }
 
 signals:
     void changed();
@@ -45,6 +52,7 @@ private:
     QListWidget* m_list;
     QWidget* m_form;
     QHash<QString, QWidget*> m_editors;
+    QHash<QString, QHBoxLayout*> m_tools;
     QPushButton* m_remove;
     QPushButton* m_up;
     QPushButton* m_down;

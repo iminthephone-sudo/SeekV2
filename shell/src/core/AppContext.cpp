@@ -74,11 +74,11 @@ void AppContext::fillProfileCombo(QComboBox* combo, const QString& preferId) con
     if (combo->currentData().toString() != keep) emit combo->currentIndexChanged(combo->currentIndex());
 }
 
-void AppContext::fillJobCombo(QComboBox* combo, const QString& preferId, bool allowNone) const {
+void AppContext::fillJobCombo(QComboBox* combo, const QString& preferId, bool allowNone, const QString& noneLabel) const {
     const QString keep = preferId.isEmpty() ? combo->currentData().toString() : preferId;
     QSignalBlocker block(combo);
     combo->clear();
-    if (allowNone) combo->addItem(tr("General letter — no specific posting"), QString());
+    if (allowNone) combo->addItem(noneLabel.isEmpty() ? tr("General letter — no specific posting") : noneLabel, QString());
     for (const QJsonValue& v : m_jobs) {
         const QJsonObject j = v.toObject();
         QString label = j.value("title").toString();

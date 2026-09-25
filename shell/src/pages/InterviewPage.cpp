@@ -26,6 +26,7 @@
 
 #include "core/AppContext.h"
 #include "core/Theme.h"
+#include "pages/RecordCoachTab.h"
 
 namespace {
 
@@ -98,9 +99,13 @@ InterviewPage::InterviewPage(AppContext* ctx, QWidget* parent) : Page(parent), m
     m_tabs->setDocumentMode(true);
     m_tabs->addTab(buildStarsTab(), tr("S.T.A.R.S practice"));
     m_tabs->addTab(buildAssessmentTab(), tr("Workplace assessment"));
-    m_tabs->addTab(buildSavedTab(), tr("Saved practice"));
+    m_recordTab = new RecordCoachTab(ctx, [this] { return m_profile->currentData().toString(); });
+    m_tabs->addTab(m_recordTab, tr("Talking about your record"));
+    m_savedTab = buildSavedTab();
+    m_tabs->addTab(m_savedTab, tr("Saved practice"));
+    connect(m_recordTab, &RecordCoachTab::saved, this, &InterviewPage::refreshSaved);
     auto tabIcons = [this] {
-        const QStringList icons = {"stars", "check-circle", "journal"};
+        const QStringList icons = {"stars", "check-circle", "shield-check", "journal"};
         for (int i = 0; i < icons.size(); ++i) m_tabs->setTabIcon(i, Theme::instance()->icon(icons.at(i)));
     };
     tabIcons();
@@ -108,14 +113,15 @@ InterviewPage::InterviewPage(AppContext* ctx, QWidget* parent) : Page(parent), m
     col->addWidget(m_tabs, 1);
 
     connect(ctx, &AppContext::profilesChanged, this, [this] { m_ctx->fillProfileCombo(m_profile); });
-    connect(ctx, &AppContext::jobsChanged, this, [this] { m_ctx->fillJobCombo(m_job, {}, true); });
+    connect(ctx, &AppContext::jobsChanged, this, [this] { m_ctx->fillJobCombo(m_job, {}, true, tr("No specific posting")); });
     connect(m_profile, &QComboBox::currentIndexChanged, this, [this] {
         loadStoryIdeas();
         refreshSaved();
+        m_recordTab->refreshProof();
     });
     connect(ctx->bridge(), &SeekBridge::ready, this, &InterviewPage::loadBanks);
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int i) {
-        if (i == 2) refreshSaved();
+        if (m_tabs->widget(i) == m_savedTab) refreshSaved();
     });
 }
 
@@ -274,6 +280,8 @@ void InterviewPage::loadBanks() {
         block.unblock();
         m_questionList->setCurrentRow(0);
     }, this);
+    m_recordTab->loadBank();
+    m_recordTab->refreshProof();
     m_ctx->bridge()->call("interview.assessment_items", [this](const QJsonValue& r, const BridgeError& e) {
         if (e.isError()) return m_ctx->reportError(tr("Loading assessment"), e);
         buildAssessmentItems(r.toObject());
@@ -623,7 +631,10 @@ QWidget* InterviewPage::buildSavedTab() {
 void InterviewPage::openSaved(int row) {
     if (row < 0 || row >= m_savedRows.size()) return;
     const QJsonObject rec = m_savedRows.at(row).toObject();
-    if (rec.value("type").toString() == "stars") {
+    if (rec.value("type").toString() == "record") {
+        m_tabs->setCurrentWidget(m_recordTab);
+        m_recordTab->openRecord(rec);
+    } else if (rec.value("type").toString() == "stars") {
         const QString qid = rec.value("question_id").toString();
         for (int i = 0; i < m_questionList->count(); ++i)
             if (m_questionList->item(i)->data(Qt::UserRole).toString() == qid) m_questionList->setCurrentRow(i);
@@ -652,15 +663,18 @@ void InterviewPage::refreshSaved() {
         m_saved->setRowCount(m_savedRows.size());
         for (int i = 0; i < m_savedRows.size(); ++i) {
             const QJsonObject rec = m_savedRows.at(i).toObject();
-            const bool stars = rec.value("type").toString() == "stars";
+            const QString type = rec.value("type").toString();
+            const bool scored = type == "stars" || type == "record";
             const QDateTime when = QDateTime::fromString(rec.value("created_at").toString(), Qt::ISODate).toLocalTime();
             m_saved->setItem(i, 0, new QTableWidgetItem(QLocale().toString(when, QLocale::ShortFormat)));
-            m_saved->setItem(i, 1, new QTableWidgetItem(stars ? tr("S.T.A.R.S") : tr("Assessment")));
-            QString summary = stars ? rec.value("question").toString()
-                                    : tr("%1 statements · %2 flag(s)").arg(rec.value("answers").toObject().size())
-                                          .arg(rec.value("flags").toInt());
+            m_saved->setItem(i, 1, new QTableWidgetItem(type == "stars"    ? tr("S.T.A.R.S")
+                                                        : type == "record" ? tr("Record question")
+                                                                           : tr("Assessment")));
+            QString summary = scored ? rec.value("question").toString()
+                                     : tr("%1 statements · %2 flag(s)").arg(rec.value("answers").toObject().size())
+                                           .arg(rec.value("flags").toInt());
             m_saved->setItem(i, 2, new QTableWidgetItem(summary));
-            m_saved->setItem(i, 3, new QTableWidgetItem(stars ? QString::number(rec.value("score").toInt()) + "%" : QString()));
+            m_saved->setItem(i, 3, new QTableWidgetItem(scored ? QString::number(rec.value("score").toInt()) + "%" : QString()));
         }
         if (!m_openRecord.isEmpty()) {
             for (int i = 0; i < m_savedRows.size(); ++i) {
@@ -676,9 +690,10 @@ void InterviewPage::refreshSaved() {
 
 void InterviewPage::activate(const QVariantMap& args) {
     m_ctx->fillProfileCombo(m_profile, args.value("profile_id").toString());
-    m_ctx->fillJobCombo(m_job, args.value("job_id").toString(), true);
+    m_ctx->fillJobCombo(m_job, args.value("job_id").toString(), true, tr("No specific posting"));
     if (m_questions.isEmpty() && m_ctx->bridge()->isReady()) loadBanks();
     if (args.value("tab").toString() == "assessment") m_tabs->setCurrentIndex(1);
+    if (args.value("tab").toString() == "record") m_tabs->setCurrentWidget(m_recordTab);
     // record_id reopens a saved practice; "latest" reopens the most recent one.
     m_openRecord = args.value("record_id").toString();
     if (m_openRecord.isEmpty() && args.value("latest").toBool()) m_openRecord = QStringLiteral("latest");

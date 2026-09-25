@@ -75,6 +75,12 @@ SectionEditor::SectionEditor(const QString& section, const QString& titleField, 
         }
         m_editors.insert(f.key, editor);
         form->addRow(f.label, editor);
+        if (f.multiline) {
+            auto* tools = new QHBoxLayout;
+            tools->setContentsMargins(0, 0, 0, 0);
+            m_tools.insert(f.key, tools);
+            form->addRow(QString(), tools);
+        }
     }
     right->addWidget(m_form);
     right->addStretch(1);
@@ -162,6 +168,25 @@ void SectionEditor::showEntry(int row) {
         }
     }
     m_loading = false;
+}
+
+QJsonObject SectionEditor::currentEntry() const {
+    const int row = m_list->currentRow();
+    return row >= 0 && row < m_entries.size() ? m_entries.at(row).toObject() : QJsonObject();
+}
+
+void SectionEditor::setCurrentField(const QString& key, const QJsonValue& value) {
+    const int row = m_list->currentRow();
+    if (row < 0 || row >= m_entries.size()) return;
+    showEntry(row);  // make sure the form shows this entry before it's rewritten
+    if (auto* text = qobject_cast<QPlainTextEdit*>(m_editors.value(key))) {
+        QStringList lines;
+        for (const QJsonValue& v : value.toArray()) lines << v.toString();
+        text->setPlainText(value.isArray() ? lines.join('\n') : value.toString());  // textChanged stores it
+    } else if (auto* line = qobject_cast<QLineEdit*>(m_editors.value(key))) {
+        line->setText(value.toString());
+        storeField(key, value);
+    }
 }
 
 void SectionEditor::storeField(const QString& key, const QJsonValue& value) {

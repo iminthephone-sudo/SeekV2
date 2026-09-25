@@ -318,7 +318,9 @@ class NLP:
         elif not starts_with_verb:
             issues.append("Open with an action verb (e.g. " + ", ".join(STRONG_VERBS[:4]) + ").")
         has_number = bool(_NUMBER.search(clean))
-        if not has_number:
+        if "[#]" in clean:
+            issues.append("Replace [#] with the real number, or delete it.")
+        elif not has_number:
             issues.append("Add a number if you can: how many, how often, how much, how fast.")
         words = len([t for t in doc if not t.is_punct])
         if words > 32:

@@ -1,0 +1,97 @@
+{
+  "_comment": "Questions about criminal history that come up in interviews, with coaching for an honest, brief, forward-looking answer. The coaching never suggests hiding or misstating anything; it helps people say the truth well. 'moves' lists which of the four answer moves (acknowledge, ownership, change, pivot) the question calls for.",
+  "questions": [
+    {
+      "id": "convicted",
+      "category": "The direct question",
+      "question": "Have you ever been convicted of a crime? Can you tell me about it?",
+      "looking_for": "Honesty, ownership and whether you've moved forward. They are not asking for the whole story.",
+      "tip": "Answer yes plainly, name it in general terms in one sentence, own it, then spend most of the answer on what you've done since.",
+      "example": "Yes. In 2019 I was convicted of a theft-related offense. I made a bad decision and I take full responsibility for it. Since then I've completed a 12-week warehouse pre-apprenticeship, earned my forklift certification and worked eight months on a recycling crew without missing a shift. I'm ready to bring that same reliability to your team.",
+      "moves": [
+        "acknowledge",
+        "ownership",
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "background_check",
+      "category": "After the background check",
+      "question": "Your background check shows a conviction. Can you explain it?",
+      "looking_for": "That the record matches what you told them, and that you're calm and accountable about it.",
+      "tip": "Stay calm and consistent with what you put on the application. Don't argue with the report; explain briefly and point to the present.",
+      "example": "Yes, that's from 2018, and I listed it on my application. I made choices I'm not proud of and I accepted the consequences. Since then I finished my GED, completed ServSafe and have worked steadily in food service for two years. My supervisor there is one of my references, and I'd bring that same work ethic to your kitchen.",
+      "moves": [
+        "acknowledge",
+        "ownership",
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "what_changed",
+      "category": "Growth",
+      "question": "What have you done since then to make sure it doesn't happen again?",
+      "looking_for": "Concrete proof of change: programs, work history, certifications, support system, stability.",
+      "tip": "Give two or three specific things you did, with names and numbers where you can. Show, don't just say you've changed.",
+      "example": "I completed a 200-hour construction pre-apprenticeship, I've kept a steady job for the last year, and I meet with a mentor every week. I've also stayed away from the people and places that were part of that time. That's why I'm confident you can count on me on this crew.",
+      "moves": [
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "trust",
+      "category": "Trust",
+      "question": "Why should we trust you with our customers, money or equipment?",
+      "looking_for": "Evidence that others already trust you now, and that you understand why they're asking.",
+      "tip": "Acknowledge the concern is fair. Then point to someone who trusts you today: a supervisor, a program, keys or cash you've handled.",
+      "example": "That's a fair question. At my current job I close the register and count the drawer every night, and it has balanced for six months. My manager gave me keys after three months. I'd earn the same trust here, and I'm glad to start with a probation period.",
+      "moves": [
+        "acknowledge",
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "gap",
+      "category": "The gap",
+      "question": "There's a gap in your work history. What were you doing during that time?",
+      "looking_for": "An honest answer that quickly turns to what you learned or did during that time.",
+      "tip": "If the gap was incarceration and they ask, say so briefly. Then talk about the work, training or programs from that time as real experience.",
+      "example": "I was incarcerated from 2020 to 2023. While I was there I worked in the kitchen five days a week, earned my ServSafe Food Handler card and finished a 16-week culinary program. Since coming home I've been working at a food bank, and I'm ready for a full-time kitchen job.",
+      "moves": [
+        "acknowledge",
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "supervision",
+      "category": "Supervision",
+      "question": "Are you on parole or probation? Will that affect your schedule?",
+      "looking_for": "That supervision won't cause surprises, and that you can handle the logistics.",
+      "tip": "Answer honestly and keep it practical: how often you check in, that you plan it around work, and that your officer supports your employment.",
+      "example": "Yes, I'm on probation until next spring. I check in once a month, and I schedule it on my day off or before my shift. My officer is supportive of me working, and it won't affect my availability.",
+      "moves": [
+        "acknowledge",
+        "change",
+        "pivot"
+      ]
+    },
+    {
+      "id": "application_box",
+      "category": "On the application",
+      "question": "You checked the box about a conviction. Is there anything you'd like to add?",
+      "looking_for": "A short, positive statement that frames who you are now.",
+      "tip": "This is your opening. Two or three sentences: own it, name your progress, say why this job fits.",
+      "example": "Thank you for asking. I made a mistake several years ago and I've worked hard since then: I've completed my forklift and OSHA 10 certifications and held a steady warehouse job for a year. I'm applying here because I want to grow with a company that values reliability.",
+      "moves": [
+        "ownership",
+        "change",
+        "pivot"
+      ]
+    }
+  ]
+}

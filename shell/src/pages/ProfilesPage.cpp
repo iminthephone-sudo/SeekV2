@@ -22,6 +22,7 @@
 #include "core/AppContext.h"
 #include "core/Theme.h"
 #include "pages/SectionEditor.h"
+#include "pages/WritingHelp.h"
 
 namespace {
 
@@ -149,6 +150,22 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
     m_summary->setPlaceholderText(tr("2–3 sentences: strengths, experience, certifications, and the work wanted."));
     m_summary->setMinimumHeight(110);
     formB->addRow(tr("Summary"), m_summary);
+    auto* summaryHelp = ui::button(tr("Write with spaCy"), "magic");
+    summaryHelp->setToolTip(tr("Drafts a summary from this profile (and a posting), and reviews the current one."));
+    auto* summaryTools = new QHBoxLayout;
+    summaryTools->addWidget(summaryHelp);
+    summaryTools->addStretch(1);
+    formB->addRow(QString(), summaryTools);
+    connect(summaryHelp, &QPushButton::clicked, this, [this] {
+        if (m_currentId.isEmpty()) return;
+        auto* dlg = new SummaryHelpDialog(m_ctx, m_currentId, collect(), this);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dlg, &SummaryHelpDialog::chosen, this, [this](const QString& text) {
+            m_summary->setPlainText(text);  // marks the profile dirty; staff still review and save
+            m_summary->setFocus();
+        });
+        dlg->open();
+    });
     m_template = new QComboBox;
     m_template->addItem(tr("Classic (serif, centered)"), "classic");
     m_template->addItem(tr("Modern (clean, left-aligned)"), "modern");
@@ -202,6 +219,26 @@ ProfilesPage::ProfilesPage(AppContext* ctx, QWidget* parent) : Page(parent), m_c
         auto* ed = new SectionEditor(key, titleField, subField, std::move(fields), hint);
         connect(ed, &SectionEditor::changed, this, [this] { setDirty(true); });
         m_sections.insert(key, ed);
+        if (QHBoxLayout* tools = ed->fieldTools("bullets")) {
+            auto* help = ui::button(tr("Improve duties with spaCy"), "magic");
+            help->setToolTip(tr("Rewrites weak bullets and suggests typical duties for this job title."));
+            tools->addWidget(help);
+            tools->addStretch(1);
+            connect(help, &QPushButton::clicked, this, [this, ed, titleField] {
+                const QJsonObject entry = ed->currentEntry();
+                if (entry.isEmpty()) return m_ctx->toast(tr("Add or select an entry first."));
+                QStringList bullets;
+                for (const QJsonValue& b : entry.value("bullets").toArray()) bullets << b.toString();
+                const QString end = entry.value("end").toString().trimmed().toLower();
+                const bool current = end.isEmpty() || end == "present" || end == "current" || end == "now";
+                auto* dlg = new DutiesHelpDialog(m_ctx, entry.value(titleField).toString(), bullets, current, this);
+                dlg->setAttribute(Qt::WA_DeleteOnClose);
+                connect(dlg, &DutiesHelpDialog::applied, this, [ed](const QStringList& lines) {
+                    ed->setCurrentField("bullets", QJsonArray::fromStringList(lines));
+                });
+                dlg->open();
+            });
+        }
         m_tabs->addTab(ed, tab);
     };
     addSection("experience", tr("Experience"), "title", "employer",

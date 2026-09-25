@@ -329,6 +329,9 @@ def analyze(profile: dict[str, Any], nlp: NLP) -> dict[str, Any]:
     check(bool(profile.get("certifications") or profile.get("training") or profile.get("education")),
           "Credentials or training", "Add certificates, GED/HSE, vocational or program training.")
 
+    placeholders = "[#]" in profile_text(profile)
+    check(not placeholders, "No [#] left", "Replace every [#] from the writing helper with a real number, or delete it.")
+
     listed = {nlp.key(s) for s in profile.get("skills", [])}
     found = nlp.find_skills(profile_text(profile))
     suggested = [s for s, _ in found.most_common() if nlp.key(s) not in listed]

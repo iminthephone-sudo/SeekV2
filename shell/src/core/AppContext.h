@@ -36,7 +36,9 @@ public:
 
     // Fill a combo with profiles / jobs, keeping the current selection when possible.
     void fillProfileCombo(QComboBox* combo, const QString& preferId = {}) const;
-    void fillJobCombo(QComboBox* combo, const QString& preferId = {}, bool allowNone = false) const;
+    // allowNone adds a first "no posting" entry; noneLabel overrides its text.
+    void fillJobCombo(QComboBox* combo, const QString& preferId = {}, bool allowNone = false,
+                      const QString& noneLabel = {}) const;
 
     void toast(const QString& message, ToastKind kind = ToastKind::Info);
     void reportError(const QString& action, const BridgeError& error);

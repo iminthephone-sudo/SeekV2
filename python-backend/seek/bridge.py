@@ -32,6 +32,8 @@ from .engines.cover_letter import TONES, CoverLetterEngine
 from .engines.jobs import STATUSES, FetchError, JobEngine, normalize_url
 from .engines.nlp import NLP, get_nlp
 from .engines.interview import InterviewEngine
+from .engines.record_coach import RecordCoach
+from .engines.writing import WritingAssist
 from .engines.optimizer import OptimizerEngine
 from .engines.profiles import CONTACT_FIELDS, SECTION_FIELDS, TEMPLATES, ProfileEngine
 from .storage import Store
@@ -71,6 +73,8 @@ class SeekService:
         self.optimizer = OptimizerEngine(self.store, self.nlp, self.profiles)
         self.letters = CoverLetterEngine(self.store, self.nlp, self.profiles)
         self.interview = InterviewEngine(self.store, self.nlp)
+        self.record_coach = RecordCoach(self.store, self.nlp)
+        self.writing = WritingAssist(self.store, self.nlp, self.profiles)
         self.shutdown_requested = False
         self._progress: Callable[[int, str], None] = lambda pct, msg: None
         self.methods: dict[str, Callable[..., Any]] = {
@@ -119,7 +123,13 @@ class SeekService:
             "interview.stars_coach": self.interview.coach,
             "interview.assessment_items": self.interview.assessment_items,
             "interview.assessment_score": self.interview.score_assessment,
+            "interview.record_questions": self.record_coach.question_bank,
+            "interview.record_coach": self.record_coach.coach,
+            "interview.record_proof": self.record_coach.proof_points,
             "interview.saved": self.interview.saved,
+            "assist.summary": self.writing.summary,
+            "assist.duties": self.writing.duties,
+            "assist.rewrite_bullet": self.writing.rewrite_bullet,
             "interview.delete": self.interview.delete,
             "history.list": lambda limit=200, kind=None: self.store.history(int(limit), kind),
         }

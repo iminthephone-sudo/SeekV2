@@ -16,6 +16,7 @@ class QPlainTextEdit;
 class QTabWidget;
 class QTableWidget;
 class QTextBrowser;
+class RecordCoachTab;
 
 // Interview practice: S.T.A.R.S answers (Situation, Task, Action, Result,
 // Skills) with spaCy coaching, and workplace-assessment practice.
@@ -60,6 +61,8 @@ private:
     QComboBox* m_profile;
     QComboBox* m_job;
     QTabWidget* m_tabs;
+    RecordCoachTab* m_recordTab;
+    QWidget* m_savedTab;
     QScrollArea* m_starsScroll = nullptr;
     QScrollArea* m_assessScroll = nullptr;
 
